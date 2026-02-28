@@ -254,3 +254,127 @@ NEGATIVE_KW = [
     "miss", "lack", "expensive", "overpriced", "regret", "return",
     "unreliable", "poor", "bad", "terrible", "waste of", "hate",
 ]
+
+# --- 视频筛选 ---
+MIN_VIEW_COUNT = 10_000      # 最低播放量
+TOP_N_VIDEOS = 20            # 分析前 N 个视频
+
+# --- LLM 配置（阿里云 Qwen，OpenAI 兼容接口）---
+LLM_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+LLM_MODEL = "qwen-plus"           # 性价比高，128K context
+LLM_MAX_TOKENS = 4096
+LLM_TEMPERATURE = 0.3
+LLM_RATE_LIMIT_DELAY = 1.5        # 每次调用间隔（秒）
+LLM_MAX_RETRIES = 3
+LLM_RETRY_BASE_DELAY = 2.0        # 指数退避基础延迟
+
+# --- LLM Prompt 模板 ---
+PROMPT_TRANSCRIPT_ANALYSIS = """你是一名专业的3D打印产品分析师。请仔细阅读以下YouTube评测视频的完整字幕文本，对该视频内容进行深度分析。
+
+视频标题: {title}
+频道: {channel}
+观看量: {view_count:,}
+赞助状态: {sponsor_status}
+
+字幕全文:
+{transcript}
+
+请用中文输出以下结构化分析，每一项都要详细、具体，引用原文中的关键表述（用括号标注英文原文）：
+
+## 1. 核心结论 (Core Conclusions)
+该评测者对Snapmaker U1的总体评价是什么？给出明确的推荐/不推荐判定及理由。
+
+## 2. 优点/亮点 (Pros/Highlights)
+逐条列出评测者提到的所有优点，每条包含:
+- 优点描述（中文）
+- 原文关键表述（English original）
+- 具体数据或对比（如有）
+
+## 3. 缺点/问题 (Cons/Issues)
+逐条列出评测者提到的所有缺点和问题，每条包含:
+- 缺点描述（中文）
+- 原文关键表述（English original）
+- 严重程度评估
+
+## 4. 改进建议 (Improvement Suggestions)
+评测者明确提出或暗示的改进建议，包括:
+- 建议内容（中文）
+- 原文依据（English original）
+
+## 5. 竞品对比 (Competitor Comparisons)
+如有与其他打印机的对比，列出:
+- 对比对象
+- 对比维度
+- 结论
+
+## 6. 关键数据点 (Key Data Points)
+提取所有具体的数值数据（打印速度、噪音、温度、价格等）。
+"""
+
+PROMPT_COMMENT_ANALYSIS = """你是一位用户反馈分析专家。请分析以下YouTube视频的用户评论，提取有价值的用户反馈。
+
+视频标题: {title}
+频道: {channel}
+评论数量: {comment_count}
+
+以下是按点赞数排序的用户评论:
+{comments}
+
+请用中文输出以下结构化分析（引用关键评论时在括号内保留英文原文）:
+
+## 1. 情感概况 (Sentiment Overview)
+整体情感倾向及分布。
+
+## 2. 正面反馈主题 (Positive Themes)
+用户最认可的方面，附代表性评论引用。
+
+## 3. 负面反馈主题 (Negative Themes)
+用户抱怨最多的问题，附代表性评论引用。
+
+## 4. 用户建议 (User Suggestions)
+用户提出的具体改进建议。
+
+## 5. 常见疑问 (Common Questions)
+用户频繁提出的问题。
+
+## 6. 关键洞察 (Key Insights)
+从评论中发现的重要信号（如共性问题、趋势等）。
+"""
+
+PROMPT_OVERALL_REPORT = """你是一位资深3D打印行业分析师。基于对{video_count}个Snapmaker U1评测视频的深度分析结果，请生成一份全面的综合分析报告。
+
+以下是每个视频的分析摘要:
+{video_summaries}
+
+以下是评论分析的汇总:
+{comment_summaries}
+
+请用中文撰写一份结构完整的综合分析报告（关键术语和原始表述在括号内保留英文），包括:
+
+## 1. 执行摘要 (Executive Summary)
+200字以内的核心发现概述。
+
+## 2. 整体口碑评估 (Overall Reputation Assessment)
+- 评测者总体态度分布
+- 推荐与不推荐的比例及理由
+
+## 3. 优点/亮点统计 (Strengths Statistics)
+汇总所有视频和评论中提到的优点，按"被提及视频数"排序。
+每项列出：优点描述、提及该优点的视频数/频道名、评论中提及的近似次数、典型原文引用（英文）。
+
+## 4. 缺点/问题统计 (Issues Statistics)
+汇总所有视频和评论中提到的问题，按"被提及视频数"排序。
+每项列出：问题描述、提及该问题的视频数/频道名、评论中提及的近似次数、典型原文引用（英文）。
+
+## 5. 核心改进方向 (Improvement Priorities)
+基于缺点统计，按优先级排序的改进建议。
+
+## 6. 竞品定位分析 (Competitive Positioning)
+相对于Bambu Lab、Prusa等竞品的市场定位分析。
+
+## 7. 评测者观点一致性与分歧 (Consensus vs Disagreements)
+不同评测者在哪些方面观点一致，哪些方面有分歧。
+
+## 8. 市场机会与风险 (Market Opportunities & Risks)
+基于分析的战略洞察。
+"""

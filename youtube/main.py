@@ -2,9 +2,9 @@
 """
 Snapmaker U1 YouTube 用户反馈提取系统 — 主入口
 
-使用 YouTube Data API v3 + youtube-transcript-api 系统性搜集
+使用 YouTube Data API v3 + youtube-transcript-api + LLM 系统性搜集
 Snapmaker U1 3D打印机量产机阶段（2025-11-15 后）的评测视频，
-提取视频内容摘要、频道画像、赞助关系和用户评论，进行结构化分析。
+提取视频内容摘要、频道画像、赞助关系和用户评论，使用 LLM 进行深度分析。
 """
 
 import os
@@ -24,7 +24,8 @@ import pandas as pd
 from config import (
     DATA_DIR, PER_VIDEO_DATA_DIR, REPORTS_DIR, PER_VIDEO_REPORTS_DIR,
     PUBLISHED_AFTER, SEARCH_QUERIES, KNOWN_REVIEWERS, KNOWN_CHANNEL_NAMES,
-    KEY_INFO_PATTERNS,
+    KEY_INFO_PATTERNS, MIN_VIEW_COUNT, TOP_N_VIDEOS,
+    LLM_RATE_LIMIT_DELAY,
 )
 from youtube_api import (
     init_youtube_client, search_videos, search_known_reviewers,
@@ -33,10 +34,13 @@ from youtube_api import (
 from transcript import get_transcript, segment_transcript, format_timestamp
 from analysis import (
     detect_sponsor_status, parse_duration, is_relevant, passes_quality,
-    classify_tier, auto_select_tier_threshold, find_key_moments,
-    analyze_sentiment, tag_topics,
+    find_key_moments, analyze_sentiment, tag_topics,
 )
 from comments import get_all_comments, clean_comment
+from llm_client import (
+    init_llm_client, analyze_transcript_with_llm,
+    analyze_comments_with_llm, generate_overall_with_llm,
+)
 from reports import generate_per_video_report, generate_overall_report
 
 # --- 日志配置 ---
@@ -54,7 +58,7 @@ def load_checkpoint(name):
     if path.exists():
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        logger.info(f"✅ 从检查点加载: {name} ({path.stat().st_size:,} bytes)")
+        logger.info(f"从检查点加载: {name} ({path.stat().st_size:,} bytes)")
         return data
     return None
 
@@ -64,7 +68,7 @@ def save_checkpoint(name, data):
     path = DATA_DIR / f"{name}.json"
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2, default=str)
-    logger.info(f"💾 保存检查点: {name}")
+    logger.info(f"保存检查点: {name}")
 
 
 def main():
@@ -81,9 +85,15 @@ def main():
         except Exception:
             pass
     load_dotenv(env_path)
+
     api_key = os.environ.get("YOUTUBE_API_KEY")
     if not api_key:
-        logger.error("❌ YOUTUBE_API_KEY 未设置。请在 .env 文件中填入 API Key。")
+        logger.error("YOUTUBE_API_KEY 未设置。请在 .env 文件中填入 API Key。")
+        sys.exit(1)
+
+    dashscope_key = os.environ.get("DASHSCOPE_API_KEY")
+    if not dashscope_key:
+        logger.error("DASHSCOPE_API_KEY 未设置。请在 .env 文件中填入阿里云 API Key。")
         sys.exit(1)
 
     # 创建输出目录
@@ -91,13 +101,16 @@ def main():
         d.mkdir(parents=True, exist_ok=True)
 
     youtube = init_youtube_client(api_key)
+    llm = init_llm_client(dashscope_key)
+
     logger.info("=" * 60)
-    logger.info("Snapmaker U1 YouTube 用户反馈提取系统")
+    logger.info("Snapmaker U1 YouTube 用户反馈提取系统（LLM 深度分析版）")
     logger.info(f"时间范围: {PUBLISHED_AFTER} 至今")
+    logger.info(f"筛选条件: 播放量 >= {MIN_VIEW_COUNT:,}，取前 {TOP_N_VIDEOS} 个")
     logger.info("=" * 60)
 
     # ===== Step 1: 视频搜索与发现 =====
-    logger.info("\n📡 Step 1: 视频搜索与发现")
+    logger.info("\nStep 1: 视频搜索与发现")
 
     cached = load_checkpoint("search_results")
     if cached:
@@ -119,7 +132,7 @@ def main():
     logger.info(f"共发现 {len(all_video_ids)} 个独立视频")
 
     # ===== Step 2: 获取视频详情 + 频道画像 =====
-    logger.info("\n📋 Step 2: 获取视频详情 + 频道画像")
+    logger.info("\nStep 2: 获取视频详情 + 频道画像")
 
     cached = load_checkpoint("video_details")
     if cached:
@@ -143,7 +156,9 @@ def main():
         if ch_id in channel_profiles:
             video["channel_profile"] = channel_profiles[ch_id]
         else:
-            video["channel_profile"] = {"subscriber_count": 0, "channel_description": "N/A"}
+            video["channel_profile"] = {
+                "subscriber_count": 0, "channel_description": "N/A",
+            }
 
     # 频道粉丝数 Top 15
     sorted_channels = sorted(
@@ -157,108 +172,91 @@ def main():
         subs_str = (f"{subs / 1_000_000:.1f}M" if subs >= 1_000_000
                     else f"{subs / 1000:.1f}K" if subs >= 1000
                     else str(subs))
-        logger.info(f"  {subs_str:>8} | {ch['channel_name']} ({ch['channel_country']})")
+        logger.info(
+            f"  {subs_str:>8} | {ch['channel_name']} ({ch['channel_country']})"
+        )
 
     # ===== Step 2.3: 赞助/样机检测（第一轮：基于描述） =====
-    logger.info("\n🏷️ Step 2.3: 赞助/样机检测（基于描述）")
+    logger.info("\nStep 2.3: 赞助/样机检测（基于描述）")
     for vid, video in video_details.items():
         video["sponsor_status"] = detect_sponsor_status(video["description"])
         if video["sponsor_status"]["is_sponsored"]:
             logger.info(
-                f"  🏷️ [{video['sponsor_status']['sponsor_type']}] "
+                f"  [{video['sponsor_status']['sponsor_type']}] "
                 f"{video['channel']} - {video['title'][:50]}"
             )
 
     sponsored_count = sum(
-        1 for v in video_details.values() if v["sponsor_status"]["is_sponsored"]
+        1 for v in video_details.values()
+        if v["sponsor_status"]["is_sponsored"]
     )
-    logger.info(f"赞助/样机检测: {sponsored_count} / {len(video_details)} 个视频")
+    logger.info(
+        f"赞助/样机检测: {sponsored_count} / {len(video_details)} 个视频"
+    )
 
-    # ===== Step 2.4: 筛选与播放量分布 =====
-    logger.info("\n📊 Step 2.4: 筛选与播放量分布")
+    # ===== Step 2.4: 筛选 Top N 视频 =====
+    logger.info(f"\nStep 2.4: 筛选 Top {TOP_N_VIDEOS} 视频（播放量 >= {MIN_VIEW_COUNT:,}）")
 
     # Layer 1: 相关性
     candidates = {vid: v for vid, v in video_details.items() if is_relevant(v)}
-    logger.info(f"Layer 1 相关性过滤: {len(video_details)} → {len(candidates)}")
+    logger.info(f"Layer 1 相关性过滤: {len(video_details)} -> {len(candidates)}")
 
-    # Layer 2: 质量
+    # Layer 2: 质量（时长 >= 60s）
     qualified = {vid: v for vid, v in candidates.items() if passes_quality(v)}
     for vid, v in qualified.items():
         v["duration_seconds"] = parse_duration(v["duration"])
-    logger.info(f"Layer 2 质量过滤: {len(candidates)} → {len(qualified)}")
+    logger.info(f"Layer 2 质量过滤: {len(candidates)} -> {len(qualified)}")
 
-    # 播放量分布
-    view_counts = sorted([v["view_count"] for v in qualified.values()], reverse=True)
-    logger.info(f"\n{'=' * 60}")
-    logger.info(f"📊 播放量分布（{len(qualified)} 个合格视频）")
-    logger.info(f"{'=' * 60}")
-    thresholds = [50000, 20000, 10000, 5000, 3000, 1000, 500, 100]
-    for th in thresholds:
-        count = sum(1 for vc in view_counts if vc >= th)
-        logger.info(f"  ≥ {th:>6,} views:  {count:>3} 个视频")
-    if view_counts:
-        logger.info(f"  中位数: {view_counts[len(view_counts) // 2]:,} views")
-        logger.info(f"  平均值: {sum(view_counts) // len(view_counts):,} views")
-
-    # 自动选择 Tier A 阈值
-    VIEW_THRESHOLD_TIER_A = auto_select_tier_threshold(view_counts)
-    logger.info(f"\n🎯 自动选择 Tier A 阈值: {VIEW_THRESHOLD_TIER_A:,} views")
-
-    # ===== Step 2.5: 分级 =====
-    logger.info("\n📊 Step 2.5: 分级")
-    for vid, video in qualified.items():
-        video["tier"] = classify_tier(video, VIEW_THRESHOLD_TIER_A)
-
-    tier_a = sorted(
-        [v for v in qualified.values() if v["tier"] == "A"],
-        key=lambda x: x["view_count"], reverse=True,
+    # Layer 3: 播放量 >= MIN_VIEW_COUNT
+    high_view = {
+        vid: v for vid, v in qualified.items()
+        if v["view_count"] >= MIN_VIEW_COUNT
+    }
+    logger.info(
+        f"Layer 3 播放量过滤 (>= {MIN_VIEW_COUNT:,}): "
+        f"{len(qualified)} -> {len(high_view)}"
     )
-    tier_b = sorted(
-        [v for v in qualified.values() if v["tier"] == "B"],
-        key=lambda x: x["view_count"], reverse=True,
-    )
-    all_qualified = tier_a + tier_b
 
-    logger.info(f"  Tier A (深度分析): {len(tier_a)} 个视频")
-    logger.info(f"  Tier B (标准分析): {len(tier_b)} 个视频")
-    logger.info(f"  总计: {len(all_qualified)} 个视频")
+    # 按播放量排序，取前 TOP_N_VIDEOS
+    top_videos = sorted(
+        high_view.values(), key=lambda x: x["view_count"], reverse=True,
+    )[:TOP_N_VIDEOS]
 
-    # 输出 Tier A 列表
     logger.info(f"\n{'=' * 100}")
-    logger.info("TIER A 视频列表:")
+    logger.info(f"Top {len(top_videos)} 视频列表:")
     logger.info(f"{'=' * 100}")
-    for i, v in enumerate(tier_a, 1):
+    for i, v in enumerate(top_videos, 1):
         mins = v["duration_seconds"] // 60
         subs = v.get("channel_profile", {}).get("subscriber_count", 0)
         subs_str = f"{subs / 1000:.0f}K" if subs >= 1000 else str(subs)
-        sponsor = "🏷️" if v.get("sponsor_status", {}).get("is_sponsored") else "  "
-        sp_type = v.get("sponsor_status", {}).get("sponsor_type", "")
+        sponsor = "[S]" if v.get("sponsor_status", {}).get("is_sponsored") else "   "
         logger.info(
             f"  {i:2d}. {sponsor} [{mins:3d}min] {v['view_count']:>10,} views | "
             f"{v['comment_count']:>4} cmt | {subs_str:>7} subs | "
-            f"{v['channel'][:20]:20s} | {v['title'][:45]} | {sp_type}"
+            f"{v['channel'][:20]:20s} | {v['title'][:45]}"
         )
 
     # 保存视频索引
-    save_checkpoint("video_index", all_qualified)
+    save_checkpoint("video_index", top_videos)
 
     filter_stats = {
         "time_cutoff": PUBLISHED_AFTER,
-        "view_threshold_tier_a": VIEW_THRESHOLD_TIER_A,
+        "min_view_count": MIN_VIEW_COUNT,
+        "top_n": TOP_N_VIDEOS,
         "total_searched": len(video_details),
         "after_relevance_filter": len(candidates),
         "after_quality_filter": len(qualified),
-        "tier_a_count": len(tier_a),
-        "tier_b_count": len(tier_b),
-        "total_qualified": len(all_qualified),
+        "after_view_filter": len(high_view),
+        "selected_count": len(top_videos),
         "sponsored_count": sum(
-            1 for v in all_qualified if v.get("sponsor_status", {}).get("is_sponsored")
+            1 for v in top_videos
+            if v.get("sponsor_status", {}).get("is_sponsored")
         ),
     }
     save_checkpoint("filter_stats", filter_stats)
 
     # ===== Step 3: 视频转录提取 =====
-    logger.info("\n🎙️ Step 3: 视频转录提取")
+    logger.info("\nStep 3: 视频转录提取")
 
     cached = load_checkpoint("transcripts")
     if cached:
@@ -268,7 +266,7 @@ def main():
 
     transcript_stats = {"success": 0, "failed": 0, "reasons": {}}
 
-    for i, video in enumerate(all_qualified):
+    for i, video in enumerate(top_videos):
         vid = video["video_id"]
 
         # 断点续跑：跳过已获取的
@@ -281,7 +279,7 @@ def main():
             continue
 
         logger.info(
-            f"[{i + 1}/{len(all_qualified)}] 转录: "
+            f"[{i + 1}/{len(top_videos)}] 转录: "
             f"{video['channel'][:20]} - {video['title'][:45]}..."
         )
 
@@ -296,11 +294,10 @@ def main():
             transcript_stats["reasons"][source] = (
                 transcript_stats["reasons"].get(source, 0) + 1
             )
-            logger.info(f"  ❌ 失败: {source}")
+            logger.info(f"  失败: {source}")
         else:
             full_text = " ".join(e.get("text", "") for e in entries)
-            seg_min = 3 if video["tier"] == "A" else 5
-            segments = segment_transcript(entries, segment_minutes=seg_min)
+            segments = segment_transcript(entries, segment_minutes=3)
 
             last_start = entries[-1].get("start", 0) if entries else 0
             transcript_results[vid] = {
@@ -312,7 +309,7 @@ def main():
             }
             transcript_stats["success"] += 1
             logger.info(
-                f"  ✅ ({source}): {len(entries)} 条字幕, {len(segments)} 段"
+                f"  ({source}): {len(entries)} 条字幕, {len(segments)} 段"
             )
 
             # 用转录文本更新赞助检测
@@ -329,19 +326,22 @@ def main():
     save_checkpoint("transcripts", transcript_results)
 
     sponsored_after = sum(
-        1 for v in all_qualified if v.get("sponsor_status", {}).get("is_sponsored")
+        1 for v in top_videos
+        if v.get("sponsor_status", {}).get("is_sponsored")
     )
     logger.info(
         f"\n转录统计: 成功 {transcript_stats['success']}, "
         f"失败 {transcript_stats['failed']}"
     )
-    logger.info(f"赞助检测更新（含转录分析）: {sponsored_after} 个视频标记为赞助/样机")
+    logger.info(
+        f"赞助检测更新（含转录分析）: {sponsored_after} 个视频标记为赞助/样机"
+    )
 
-    # ===== Step 4: 视频内容分析 =====
-    logger.info("\n🔍 Step 4: 视频内容分析")
+    # ===== Step 4: 关键词内容分析（补充数据） =====
+    logger.info("\nStep 4: 关键词内容分析（补充数据）")
 
     video_content_analysis = {}
-    for video in all_qualified:
+    for video in top_videos:
         vid = video["video_id"]
         tr = transcript_results.get(vid, {})
 
@@ -349,7 +349,6 @@ def main():
             "video_id": vid,
             "title": video["title"],
             "channel": video["channel"],
-            "tier": video["tier"],
             "duration_seconds": video.get("duration_seconds", 0),
             "view_count": video["view_count"],
             "transcript_status": tr.get("status", "not_attempted"),
@@ -382,10 +381,10 @@ def main():
             for seg in segments:
                 seg_info_types = set()
                 seg_text_lower = seg.get("full_text", "").lower()
-                for info_type, config in KEY_INFO_PATTERNS.items():
-                    for pattern in config["patterns"]:
+                for info_type, cfg in KEY_INFO_PATTERNS.items():
+                    for pattern in cfg["patterns"]:
                         if re.search(pattern, seg_text_lower):
-                            seg_info_types.add(config["label"])
+                            seg_info_types.add(cfg["label"])
                             break
                 analysis["segments_overview"].append({
                     "time_range": (
@@ -405,31 +404,32 @@ def main():
         video_content_analysis[vid] = analysis
 
     save_checkpoint("video_content_analysis", video_content_analysis)
-    logger.info(f"内容分析完成: {len(video_content_analysis)} 个视频")
+    logger.info(f"关键词分析完成: {len(video_content_analysis)} 个视频")
 
     # ===== Step 5: 获取评论 =====
-    logger.info("\n💬 Step 5: 获取评论")
+    logger.info("\nStep 5: 获取评论")
 
     cached = load_checkpoint("all_comments")
     if cached:
         all_comments = cached
     else:
         all_comments = []
-        for i, video in enumerate(all_qualified):
+        for i, video in enumerate(top_videos):
             vid = video["video_id"]
             if video["comment_count"] == 0:
                 continue
-            max_c = 500 if video["tier"] == "A" else 200
+            max_c = 500
             logger.info(
-                f"[{i + 1}/{len(all_qualified)}] 评论: "
-                f"{video['channel'][:18]} - {video['title'][:40]}... (max {max_c})"
+                f"[{i + 1}/{len(top_videos)}] 评论: "
+                f"{video['channel'][:18]} - {video['title'][:40]}... "
+                f"(max {max_c})"
             )
             comments = get_all_comments(youtube, vid, max_comments=max_c)
             all_comments.extend(comments)
             top_level = [c for c in comments if not c["is_reply"]]
             replies = [c for c in comments if c["is_reply"]]
             logger.info(
-                f"  → {len(top_level)} 顶层 + {len(replies)} 回复 = "
+                f"  -> {len(top_level)} 顶层 + {len(replies)} 回复 = "
                 f"{len(comments)} 条"
             )
             time.sleep(0.5)
@@ -438,8 +438,8 @@ def main():
 
     logger.info(f"评论获取完成: {len(all_comments)} 条")
 
-    # ===== Step 6: 评论分析 =====
-    logger.info("\n📊 Step 6: 评论分析")
+    # ===== Step 6: 评论基础分析（关键词标注） =====
+    logger.info("\nStep 6: 评论基础分析（关键词标注）")
 
     df = pd.DataFrame(all_comments)
 
@@ -468,15 +468,85 @@ def main():
         df_meaningful = pd.DataFrame()
         logger.info("无评论数据")
 
-    # 更新 filter_stats
     filter_stats["total_comments"] = len(df)
 
-    # ===== Step 7: 生成单视频详情报告（Tier A） =====
-    logger.info("\n📝 Step 7: 生成 Tier A 视频详情报告")
+    # ===== Step 7: LLM 深度分析 =====
+    logger.info("\nStep 7: LLM 深度分析 (Qwen)")
 
-    for video in tier_a:
+    cached_llm = load_checkpoint("llm_analysis")
+    llm_results = cached_llm if cached_llm else {}
+
+    for i, video in enumerate(top_videos):
+        vid = video["video_id"]
+
+        # 断点续跑：跳过已分析的
+        existing = llm_results.get(vid, {})
+        if (existing.get("transcript", {}).get("status") == "success"
+                and existing.get("comments", {}).get("status") in (
+                    "success", "no_comments")):
+            logger.info(
+                f"[{i+1}/{len(top_videos)}] 跳过已分析: "
+                f"{video['channel'][:20]} - {video['title'][:40]}"
+            )
+            continue
+
+        logger.info(
+            f"\n[{i+1}/{len(top_videos)}] LLM 分析: "
+            f"{video['channel'][:20]} - {video['title'][:40]}"
+        )
+
+        vid_result = llm_results.get(vid, {})
+
+        # 7a: 字幕内容分析
+        tr = transcript_results.get(vid, {})
+        if tr.get("status") == "success" and tr.get("full_text"):
+            transcript_analysis = analyze_transcript_with_llm(
+                llm, video, tr["full_text"],
+            )
+            vid_result["transcript"] = transcript_analysis
+            logger.info(f"  字幕分析: {transcript_analysis['status']}")
+        else:
+            vid_result["transcript"] = {
+                "status": "skipped",
+                "analysis_text": "",
+                "error": f"字幕不可用: {tr.get('status', 'missing')}",
+            }
+            logger.info(f"  字幕分析: 跳过（无字幕）")
+
+        # 7b: 评论分析
+        if len(df_meaningful) > 0:
+            video_comments = df_meaningful[
+                df_meaningful["video_id"] == vid
+            ].copy()
+        else:
+            video_comments = pd.DataFrame()
+
+        comment_analysis = analyze_comments_with_llm(
+            llm, video, video_comments,
+        )
+        vid_result["comments"] = comment_analysis
+        logger.info(f"  评论分析: {comment_analysis['status']}")
+
+        llm_results[vid] = vid_result
+
+        # 每个视频都保存检查点（LLM 调用较贵，不能丢）
+        save_checkpoint("llm_analysis", llm_results)
+
+    success_count = sum(
+        1 for r in llm_results.values()
+        if r.get("transcript", {}).get("status") == "success"
+    )
+    logger.info(
+        f"\nLLM 分析完成: {success_count}/{len(top_videos)} 个视频字幕分析成功"
+    )
+
+    # ===== Step 8: 生成单视频详情报告 =====
+    logger.info("\nStep 8: 生成视频详情报告（中文）")
+
+    for video in top_videos:
         vid = video["video_id"]
         ca = video_content_analysis.get(vid, {})
+        llm_result = llm_results.get(vid, {})
 
         if len(df_meaningful) > 0:
             video_comments = df_meaningful[
@@ -485,7 +555,9 @@ def main():
         else:
             video_comments = pd.DataFrame()
 
-        report_text = generate_per_video_report(video, ca, video_comments)
+        report_text = generate_per_video_report(
+            video, ca, video_comments, llm_result,
+        )
 
         safe_channel = re.sub(r'[^\w\-]', '_', video["channel"])[:20]
         safe_title = re.sub(r'[^\w\-]', '_', video["title"])[:30]
@@ -494,35 +566,39 @@ def main():
         filepath = PER_VIDEO_REPORTS_DIR / filename
         with open(filepath, "w", encoding="utf-8") as f:
             f.write(report_text)
-        logger.info(f"✅ 生成: {filename}")
+        logger.info(f"生成: {filename}")
 
-    logger.info(f"共生成 {len(tier_a)} 份 Tier A 视频详情报告")
+    logger.info(f"共生成 {len(top_videos)} 份视频详情报告")
 
-    # ===== Step 8: 生成总体报告 =====
-    logger.info("\n📊 Step 8: 生成总体报告")
+    # ===== Step 9: 生成总体报告（LLM 综合分析） =====
+    logger.info("\nStep 9: 生成总体报告（LLM 综合分析）")
+
+    overall_llm = generate_overall_with_llm(llm, llm_results, top_videos)
+    save_checkpoint("overall_llm_analysis", overall_llm)
+    logger.info(f"LLM 综合分析: {overall_llm['status']}")
 
     report_text = generate_overall_report(
-        all_qualified=all_qualified,
-        tier_a=tier_a,
-        tier_b=tier_b,
+        top_videos=top_videos,
         filter_stats=filter_stats,
         df_meaningful=df_meaningful,
         transcript_stats=transcript_stats,
         video_content_analysis=video_content_analysis,
         channel_profiles=channel_profiles,
+        llm_results=llm_results,
+        overall_llm=overall_llm,
     )
 
     report_path = REPORTS_DIR / "youtube_analysis_report.md"
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(report_text)
-    logger.info(f"✅ 总体报告已生成: {report_path}")
+    logger.info(f"总体报告已生成: {report_path}")
 
     # ===== 完成 =====
     logger.info("\n" + "=" * 60)
-    logger.info("✅ 全部完成！")
+    logger.info("全部完成！")
     logger.info(f"  数据目录: {DATA_DIR}")
     logger.info(f"  报告目录: {REPORTS_DIR}")
-    logger.info(f"  Tier A 报告: {PER_VIDEO_REPORTS_DIR}")
+    logger.info(f"  视频报告: {PER_VIDEO_REPORTS_DIR}")
     logger.info("=" * 60)
 
     # 输出文件清单
