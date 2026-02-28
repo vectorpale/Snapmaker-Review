@@ -27,8 +27,31 @@ logger = logging.getLogger(__name__)
 
 
 def init_llm_client(api_key):
-    """创建 OpenAI 兼容客户端（指向阿里云 DashScope）"""
+    """创建 OpenAI 兼容客户端"""
     return OpenAI(api_key=api_key, base_url=LLM_BASE_URL)
+
+
+def preflight_check_llm(client):
+    """
+    启动时预检 LLM 连通性和 API Key 有效性。
+
+    发送一个极简请求（max_tokens=1），快速验证:
+    - API Key 是否正确
+    - Base URL 是否可达
+    - 模型名是否有效
+
+    返回: (ok: bool, error_msg: str | None)
+    """
+    try:
+        response = client.chat.completions.create(
+            model=LLM_MODEL,
+            max_tokens=1,
+            messages=[{"role": "user", "content": "hi"}],
+        )
+        _ = response.choices[0].message.content
+        return True, None
+    except Exception as e:
+        return False, str(e)
 
 
 def _call_llm(client, prompt, max_tokens=None):

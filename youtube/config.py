@@ -259,9 +259,13 @@ NEGATIVE_KW = [
 MIN_VIEW_COUNT = 10_000      # 最低播放量
 TOP_N_VIDEOS = 20            # 分析前 N 个视频
 
-# --- LLM 配置（阿里云 Qwen，OpenAI 兼容接口）---
-LLM_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-LLM_MODEL = "qwen-plus"           # 性价比高，128K context
+# --- LLM 配置（OpenAI 兼容接口，支持阿里云 Qwen / OpenAI / 其他兼容服务）---
+# 通过环境变量覆盖：LLM_BASE_URL, LLM_MODEL
+LLM_BASE_URL = os.environ.get(
+    "LLM_BASE_URL",
+    "https://dashscope.aliyuncs.com/compatible-mode/v1",
+)
+LLM_MODEL = os.environ.get("LLM_MODEL", "qwen-plus")
 LLM_MAX_TOKENS = 4096
 LLM_TEMPERATURE = 0.3
 LLM_RATE_LIMIT_DELAY = 1.5        # 每次调用间隔（秒）

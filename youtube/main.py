@@ -38,7 +38,8 @@ from analysis import (
 )
 from comments import get_all_comments, clean_comment
 from llm_client import (
-    init_llm_client, analyze_transcript_with_llm,
+    init_llm_client, preflight_check_llm,
+    analyze_transcript_with_llm,
     analyze_comments_with_llm, generate_overall_with_llm,
 )
 from reports import generate_per_video_report, generate_overall_report
@@ -99,9 +100,13 @@ def main():
         logger.error("YOUTUBE_API_KEY 未设置。请在 .env 文件中填入 API Key。")
         sys.exit(1)
 
-    dashscope_key = os.environ.get("DASHSCOPE_API_KEY")
-    if not dashscope_key:
-        logger.error("DASHSCOPE_API_KEY 未设置。请在 .env 文件中填入阿里云 API Key。")
+    # LLM API Key：优先 LLM_API_KEY，兼容旧的 DASHSCOPE_API_KEY
+    llm_api_key = os.environ.get("LLM_API_KEY") or os.environ.get("DASHSCOPE_API_KEY")
+    if not llm_api_key:
+        logger.error(
+            "LLM API Key 未设置。请在 .env 中设置 LLM_API_KEY"
+            "（或 DASHSCOPE_API_KEY）。"
+        )
         sys.exit(1)
 
     # 创建输出目录
@@ -116,7 +121,19 @@ def main():
         logger.info("未配置代理（如需翻墙，请在 .env 中设置 HTTPS_PROXY）")
 
     youtube = init_youtube_client(api_key)
-    llm = init_llm_client(dashscope_key)
+    llm = init_llm_client(llm_api_key)
+
+    # LLM 连通性预检（快速验证 API Key + Base URL + 模型）
+    from config import LLM_BASE_URL, LLM_MODEL
+    logger.info(f"LLM 预检: {LLM_BASE_URL} / {LLM_MODEL}")
+    ok, err = preflight_check_llm(llm)
+    if not ok:
+        logger.error(f"LLM 预检失败: {err}")
+        logger.error(
+            "请检查 .env 中的 LLM_API_KEY、LLM_BASE_URL、LLM_MODEL 配置。"
+        )
+        sys.exit(1)
+    logger.info("LLM 预检通过")
 
     logger.info("=" * 60)
     logger.info("Snapmaker U1 YouTube 用户反馈提取系统（LLM 深度分析版）")
