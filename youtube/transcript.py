@@ -5,6 +5,7 @@
 """
 
 import logging
+import time
 from youtube_transcript_api import YouTubeTranscriptApi
 from youtube_transcript_api._errors import (
     TranscriptsDisabled,
@@ -17,47 +18,65 @@ logger = logging.getLogger(__name__)
 _ytt_api = YouTubeTranscriptApi()
 
 
-def get_transcript(video_id):
+def _fetch_transcript_once(video_id):
     """
-    获取视频字幕/转录，优先英文手动字幕，其次自动生成。
+    单次尝试获取字幕，优先英文，其次其他语言。
+
+    返回: (entries, source) 或抛出异常
+    """
+    # 优先尝试英文
+    try:
+        transcript = _ytt_api.fetch(video_id, languages=['en'])
+        entries = transcript.to_raw_data()
+        source = f"{'auto' if transcript.is_generated else 'manual'}_en"
+        return entries, source
+    except (TranscriptsDisabled, NoTranscriptFound):
+        raise
+    except Exception:
+        pass
+
+    # 英文不可用，尝试列出所有可用语言
+    transcript_list = _ytt_api.list(video_id)
+    available = list(transcript_list)
+    if not available:
+        return None, "no_transcript"
+
+    first = available[0]
+    lang = first.language_code
+    transcript = _ytt_api.fetch(video_id, languages=[lang])
+    entries = transcript.to_raw_data()
+    source = f"{'auto' if transcript.is_generated else 'manual'}_{lang}"
+    return entries, source
+
+
+def get_transcript(video_id, max_retries=3, base_delay=2.0):
+    """
+    获取视频字幕/转录，带指数退避重试。
 
     返回: (entries: list[dict] | None, source: str)
         entries: [{"text": ..., "start": ..., "duration": ...}, ...]
         source: "manual_en" / "auto_en" / "manual_XX" / "auto_XX" / 错误原因
     """
-    try:
-        # 优先尝试英文
+    last_error = None
+    for attempt in range(max_retries + 1):
         try:
-            transcript = _ytt_api.fetch(video_id, languages=['en'])
-            entries = transcript.to_raw_data()
-            source = f"{'auto' if transcript.is_generated else 'manual'}_en"
-            return entries, source
-        except Exception:
-            pass
+            return _fetch_transcript_once(video_id)
+        except TranscriptsDisabled:
+            return None, "disabled"
+        except NoTranscriptFound:
+            return None, "not_found"
+        except Exception as e:
+            last_error = e
+            if attempt < max_retries:
+                delay = base_delay * (2 ** attempt)
+                logger.warning(
+                    f"字幕获取失败 (video={video_id}), "
+                    f"{delay}s 后重试 ({attempt + 1}/{max_retries}): {e}"
+                )
+                time.sleep(delay)
 
-        # 英文不可用，尝试列出所有可用语言
-        try:
-            transcript_list = _ytt_api.list(video_id)
-            available = list(transcript_list)
-            if not available:
-                return None, "no_transcript"
-
-            # 尝试获取第一个可用语言
-            first = available[0]
-            lang = first.language_code
-            transcript = _ytt_api.fetch(video_id, languages=[lang])
-            entries = transcript.to_raw_data()
-            source = f"{'auto' if transcript.is_generated else 'manual'}_{lang}"
-            return entries, source
-        except Exception:
-            return None, "list_failed"
-
-    except TranscriptsDisabled:
-        return None, "disabled"
-    except NoTranscriptFound:
-        return None, "not_found"
-    except Exception as e:
-        return None, f"error: {str(e)}"
+    logger.error(f"字幕获取最终失败 (video={video_id}): {last_error}")
+    return None, "list_failed"
 
 
 def format_timestamp(seconds):
