@@ -57,9 +57,12 @@ def _extract_subtitles(video_id):
         "no_warnings": True,
         "skip_download": True,
         "logger": _ytdl_logger,
+        # 启用 EJS challenge solver（从 GitHub 下载，需要 Node.js runtime）
+        # 解决 "n challenge solving failed" 警告，优化请求避免 429 限流
+        "remote_components": ["ejs:github"],
     }
 
-    # Node.js runtime（消除 "No supported JavaScript runtime" 警告）
+    # Node.js runtime（EJS solver 和 JS challenge 都需要）
     if os.path.isfile(_node_path):
         ydl_opts["js_runtimes"] = {"node": {"path": _node_path}}
 
