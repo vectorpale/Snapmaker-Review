@@ -1,52 +1,137 @@
 """
 视频转录提取模块
 
-使用 youtube-transcript-api v1.x 新 API 获取字幕/转录文本。
+使用 yt-dlp 获取字幕/转录文本（替代 youtube-transcript-api，解决 IP 封锁问题）。
 """
 
+import json
 import logging
+import os
+import tempfile
 import time
-from youtube_transcript_api import YouTubeTranscriptApi
-from youtube_transcript_api._errors import (
-    TranscriptsDisabled,
-    NoTranscriptFound,
-)
+
+import yt_dlp
 
 logger = logging.getLogger(__name__)
 
-# 全局实例（v1.x 要求实例化）
-_ytt_api = YouTubeTranscriptApi()
 
-
-def _fetch_transcript_once(video_id):
+def _extract_subtitles(video_id):
     """
-    单次尝试获取字幕，优先英文，其次其他语言。
+    使用 yt-dlp 提取字幕。
+
+    策略: 手动英文 → 自动英文 → 其他语言手动 → 其他语言自动
 
     返回: (entries, source) 或抛出异常
+        entries: [{"text": ..., "start": ..., "duration": ...}, ...]
+        source: "manual_en" / "auto_en" / "manual_XX" / "auto_XX"
     """
-    # 优先尝试英文
-    try:
-        transcript = _ytt_api.fetch(video_id, languages=['en'])
-        entries = transcript.to_raw_data()
-        source = f"{'auto' if transcript.is_generated else 'manual'}_en"
-        return entries, source
-    except (TranscriptsDisabled, NoTranscriptFound):
-        raise
-    except Exception:
-        pass
+    url = f"https://www.youtube.com/watch?v={video_id}"
 
-    # 英文不可用，尝试列出所有可用语言
-    transcript_list = _ytt_api.list(video_id)
-    available = list(transcript_list)
-    if not available:
+    # 第一步：提取视频信息，查看可用字幕
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+
+    manual_subs = info.get("subtitles", {})
+    auto_subs = info.get("automatic_captions", {})
+
+    # 确定字幕来源
+    sub_lang = None
+    is_auto = False
+
+    if "en" in manual_subs:
+        sub_lang = "en"
+        is_auto = False
+    elif "en" in auto_subs:
+        sub_lang = "en"
+        is_auto = True
+    elif manual_subs:
+        sub_lang = next(iter(manual_subs))
+        is_auto = False
+    elif auto_subs:
+        # 自动字幕中排除 "live_chat"
+        for lang in auto_subs:
+            if lang != "live_chat":
+                sub_lang = lang
+                is_auto = True
+                break
+
+    if not sub_lang:
         return None, "no_transcript"
 
-    first = available[0]
-    lang = first.language_code
-    transcript = _ytt_api.fetch(video_id, languages=[lang])
-    entries = transcript.to_raw_data()
-    source = f"{'auto' if transcript.is_generated else 'manual'}_{lang}"
+    # 第二步：下载字幕文件（json3 格式以获取时间戳）
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out_template = os.path.join(tmpdir, "%(id)s.%(ext)s")
+        download_opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "skip_download": True,
+            "writesubtitles": not is_auto,
+            "writeautomaticsub": is_auto,
+            "subtitleslangs": [sub_lang],
+            "subtitlesformat": "json3",
+            "outtmpl": out_template,
+        }
+
+        with yt_dlp.YoutubeDL(download_opts) as ydl:
+            ydl.download([url])
+
+        # 查找下载的字幕文件
+        sub_file = None
+        for fname in os.listdir(tmpdir):
+            if fname.endswith(".json3"):
+                sub_file = os.path.join(tmpdir, fname)
+                break
+
+        if not sub_file:
+            return None, "download_failed"
+
+        with open(sub_file, "r", encoding="utf-8") as f:
+            sub_data = json.load(f)
+
+    # 第三步：解析 json3 格式为 entries
+    entries = _parse_json3(sub_data)
+    if not entries:
+        return None, "parse_failed"
+
+    source = f"{'auto' if is_auto else 'manual'}_{sub_lang}"
     return entries, source
+
+
+def _parse_json3(sub_data):
+    """
+    解析 yt-dlp json3 字幕格式。
+
+    json3 格式:
+    {"events": [{"tStartMs": 1234, "dDurationMs": 5000, "segs": [{"utf8": "text"}]}, ...]}
+
+    返回: [{"text": ..., "start": ..., "duration": ...}, ...]
+    """
+    entries = []
+    for event in sub_data.get("events", []):
+        segs = event.get("segs")
+        if not segs:
+            continue
+
+        text = "".join(seg.get("utf8", "") for seg in segs).strip()
+        # 跳过空行和纯换行
+        if not text or text == "\n":
+            continue
+
+        start_ms = event.get("tStartMs", 0)
+        duration_ms = event.get("dDurationMs", 0)
+
+        entries.append({
+            "text": text,
+            "start": start_ms / 1000.0,
+            "duration": duration_ms / 1000.0,
+        })
+
+    return entries
 
 
 def get_transcript(video_id, max_retries=3, base_delay=2.0):
@@ -60,11 +145,7 @@ def get_transcript(video_id, max_retries=3, base_delay=2.0):
     last_error = None
     for attempt in range(max_retries + 1):
         try:
-            return _fetch_transcript_once(video_id)
-        except TranscriptsDisabled:
-            return None, "disabled"
-        except NoTranscriptFound:
-            return None, "not_found"
+            return _extract_subtitles(video_id)
         except Exception as e:
             last_error = e
             if attempt < max_retries:
@@ -95,7 +176,7 @@ def segment_transcript(entries, segment_minutes=3):
 
     参数:
         entries: [{"text": ..., "start": ..., "duration": ...}, ...]
-        segment_minutes: 每段时长（分钟），Tier A 用 3，Tier B 用 5
+        segment_minutes: 每段时长（分钟）
 
     返回: list[dict]，每段含 start_time, start_timestamp, end_timestamp, full_text, texts
     """
