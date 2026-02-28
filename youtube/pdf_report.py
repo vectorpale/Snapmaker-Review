@@ -1,7 +1,8 @@
 """
 PDF 报告生成模块
 
-使用 Jinja2 + Matplotlib + WeasyPrint 生成专业 PDF 产品分析报告。
+使用 Jinja2 + Matplotlib + xhtml2pdf 生成专业 PDF 产品分析报告。
+xhtml2pdf 是纯 Python 实现，无需安装 GTK 等系统级依赖，Windows/Mac/Linux 通用。
 """
 
 import base64
@@ -17,7 +18,7 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import pandas as pd
 from jinja2 import Environment, FileSystemLoader
-from weasyprint import HTML
+from xhtml2pdf import pisa
 
 logger = logging.getLogger(__name__)
 
@@ -563,11 +564,17 @@ def generate_pdf_report(
         top_videos=top_videos,
     )
 
-    # --- 8. Convert to PDF ---
+    # --- 8. Convert to PDF via xhtml2pdf ---
     logger.info("  生成 PDF...")
-    HTML(string=html_content, base_url=str(TEMPLATES_DIR)).write_pdf(
-        str(output_path)
-    )
+    with open(output_path, "wb") as f:
+        pisa_status = pisa.CreatePDF(
+            html_content,
+            dest=f,
+            encoding="utf-8",
+        )
+
+    if pisa_status.err:
+        logger.error(f"  PDF 生成过程中有 {pisa_status.err} 个错误")
 
     size_kb = output_path.stat().st_size / 1024
     logger.info(f"  PDF 报告已生成: {output_path} ({size_kb:.0f} KB)")
