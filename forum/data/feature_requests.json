@@ -1,0 +1,145 @@
+[
+  {
+    "topic_id": 39639,
+    "title": "Maker Tuesday | Snapmaker U1 Feature Highlights and Discussion",
+    "url": "https://forum.snapmaker.com/t/maker-tuesday-snapmaker-u1-feature-highlights-and-discussion/39639",
+    "themes": [
+      "discussion"
+    ],
+    "created_at": "2025-07-08T00:00:00Z",
+    "views": 3500,
+    "reply_count": 25,
+    "like_count": 30,
+    "support_signals": 0,
+    "total_support": 30,
+    "description": "Feature video of Snapmaker U1. Next-generation multi-color and multi-material 3D printer built for fast speed, efficiency, and creativity.",
+    "has_official_response": true,
+    "resolution_status": "⚪ 不适用"
+  },
+  {
+    "topic_id": 40531,
+    "title": "Custom Firmware for Snapmaker U1 - Enhanced Features & WebRTC Camera",
+    "url": "https://forum.snapmaker.com/t/custom-firmware-for-snapmaker-u1-enhanced-features-webrtc-camera/40531",
+    "themes": [
+      "firmware_software",
+      "camera",
+      "open_source"
+    ],
+    "created_at": "2025-11-26T00:00:00Z",
+    "views": 5500,
+    "reply_count": 22,
+    "like_count": 30,
+    "support_signals": 0,
+    "total_support": 30,
+    "description": "Custom firmware adding SSH access, hardware-accelerated camera with WebRTC streaming. Warning: may void warranty.",
+    "has_official_response": true,
+    "resolution_status": "⚪ 不适用"
+  },
+  {
+    "topic_id": 40213,
+    "title": "U1 improvement: Manual Leveling Wizard",
+    "url": "https://forum.snapmaker.com/t/u1-improvement-manual-leveling-wizard/40213",
+    "themes": [
+      "calibration",
+      "firmware_software"
+    ],
+    "created_at": "2025-10-24T00:00:00Z",
+    "views": 3000,
+    "reply_count": 15,
+    "like_count": 20,
+    "support_signals": 0,
+    "total_support": 20,
+    "description": "U1 now has an on-screen wizard to assist in manual bed leveling, added by beta tester request.",
+    "has_official_response": true,
+    "resolution_status": "⚪ 不适用"
+  },
+  {
+    "topic_id": 40578,
+    "title": "Add Direct U1 Printing & Toolhead/Filament Mapping to Vanilla OrcaSlicer",
+    "url": "https://forum.snapmaker.com/t/add-direct-u1-printing-toolhead-filament-mapping-to-vanilla-orcaslicer/40578",
+    "themes": [
+      "slicer",
+      "open_source"
+    ],
+    "created_at": "2025-12-01T00:00:00Z",
+    "views": 3000,
+    "reply_count": 15,
+    "like_count": 20,
+    "support_signals": 0,
+    "total_support": 20,
+    "description": "Request for vanilla OrcaSlicer support for U1 with same functionality as Snapmaker Orca. Users can connect to U1 via Fluidd in official OrcaSlicer.",
+    "has_official_response": true,
+    "resolution_status": "⚪ 不适用"
+  },
+  {
+    "topic_id": 41036,
+    "title": "Feature Request: Smooth Timelapse Mode with Fixed Printhead Position",
+    "url": "https://forum.snapmaker.com/t/feature-request-smooth-timelapse-mode-with-fixed-printhead-position/41036",
+    "themes": [
+      "camera"
+    ],
+    "created_at": "2026-01-21T00:00:00Z",
+    "views": 2000,
+    "reply_count": 12,
+    "like_count": 15,
+    "support_signals": 0,
+    "total_support": 15,
+    "description": "Feature request for smooth timelapse mode. Current recordings show printhead glitching between frames.",
+    "has_official_response": false,
+    "resolution_status": "⚪ 不适用"
+  },
+  {
+    "topic_id": 41246,
+    "title": "Snapmaker Automatic Material Management (S.A.M.M)",
+    "url": "https://forum.snapmaker.com/t/snapmaker-automatic-material-managment-s-a-m-m/41246",
+    "themes": [
+      "filament_feed",
+      "vs_competitor"
+    ],
+    "created_at": "2026-02-14T00:00:00Z",
+    "views": 2000,
+    "reply_count": 10,
+    "like_count": 15,
+    "support_signals": 0,
+    "total_support": 15,
+    "description": "Request for Snapmaker to build filament management system like Bambu/Anycubic/Creality. Praises U1 as 'this is how tool change is done.'",
+    "has_official_response": true,
+    "resolution_status": "⚪ 不适用"
+  },
+  {
+    "topic_id": 41191,
+    "title": "Feature Request: Manual Filament roll-over (on the fly)",
+    "url": "https://forum.snapmaker.com/t/feature-request-manual-filament-roll-over-on-the-fly/41191",
+    "themes": [
+      "filament_feed",
+      "firmware_software"
+    ],
+    "created_at": "2026-02-06T00:00:00Z",
+    "views": 1500,
+    "reply_count": 8,
+    "like_count": 10,
+    "support_signals": 0,
+    "total_support": 10,
+    "description": "Cannot manually select filament to replace run-out during print. Firmware 1.1.0 with 4 filaments loaded.",
+    "has_official_response": false,
+    "resolution_status": "⚪ 不适用"
+  },
+  {
+    "topic_id": 41270,
+    "title": "Feature Request - Wall and Top/Bottom layers Material Sequencing",
+    "url": "https://forum.snapmaker.com/t/feature-request-wall-and-top-bottom-layers-material-sequencing/41270",
+    "themes": [
+      "slicer",
+      "multi_color"
+    ],
+    "created_at": "2026-02-21T00:00:00Z",
+    "views": 1000,
+    "reply_count": 5,
+    "like_count": 8,
+    "support_signals": 0,
+    "total_support": 8,
+    "description": "Feature request for wall and top/bottom layer material sequencing in multimaterial prints.",
+    "has_official_response": false,
+    "resolution_status": "⚪ 不适用"
+  }
+]
