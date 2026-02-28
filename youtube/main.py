@@ -69,7 +69,18 @@ def save_checkpoint(name, data):
 
 def main():
     # ===== Step 0: 环境准备 =====
-    load_dotenv(Path(__file__).parent.parent / ".env")
+    env_path = Path(__file__).parent.parent / ".env"
+    # Windows PowerShell 的 echo 会生成 UTF-16 编码文件，需要自动转换
+    if env_path.exists():
+        try:
+            raw = env_path.read_bytes()
+            if raw[:2] in (b'\xff\xfe', b'\xfe\xff'):
+                text = raw.decode('utf-16').strip()
+                env_path.write_text(text + '\n', encoding='utf-8')
+                logger.info("已将 .env 从 UTF-16 转换为 UTF-8")
+        except Exception:
+            pass
+    load_dotenv(env_path)
     api_key = os.environ.get("YOUTUBE_API_KEY")
     if not api_key:
         logger.error("❌ YOUTUBE_API_KEY 未设置。请在 .env 文件中填入 API Key。")
