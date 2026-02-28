@@ -2,7 +2,7 @@
 """
 Snapmaker U1 YouTube 用户反馈提取系统 — 主入口
 
-使用 YouTube Data API v3 + youtube-transcript-api + LLM 系统性搜集
+使用 YouTube Data API v3 + yt-dlp + LLM 系统性搜集
 Snapmaker U1 3D打印机量产机阶段（2025-11-15 后）的评测视频，
 提取视频内容摘要、频道画像、赞助关系和用户评论，使用 LLM 进行深度分析。
 """
