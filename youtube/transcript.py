@@ -61,7 +61,7 @@ def _extract_subtitles(video_id):
 
     # Node.js runtime（消除 "No supported JavaScript runtime" 警告）
     if os.path.isfile(_node_path):
-        ydl_opts["js_runtimes"] = f"node:{_node_path}"
+        ydl_opts["js_runtimes"] = {"node": {"path": _node_path}}
 
     # 代理支持（从环境变量读取）
     proxy_url = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
