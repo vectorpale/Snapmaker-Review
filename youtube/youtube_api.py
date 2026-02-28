@@ -4,8 +4,11 @@ YouTube Data API v3 封装模块
 提供视频搜索、视频详情、频道画像、评论获取等功能。
 """
 
+import os
 import time
 import logging
+
+import httplib2
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
@@ -15,7 +18,13 @@ logger = logging.getLogger(__name__)
 
 
 def init_youtube_client(api_key):
-    """创建 YouTube Data API v3 客户端"""
+    """创建 YouTube Data API v3 客户端（自动检测代理配置）"""
+    proxy_url = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
+    if proxy_url:
+        proxy_info = httplib2.proxy_info_from_url(proxy_url)
+        http = httplib2.Http(proxy_info=proxy_info)
+        logger.info(f"YouTube API 使用代理: {proxy_url}")
+        return build("youtube", "v3", developerKey=api_key, http=http)
     return build("youtube", "v3", developerKey=api_key)
 
 

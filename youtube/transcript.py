@@ -6,6 +6,8 @@
 
 import json
 import logging
+import os
+import shutil
 import time
 
 import yt_dlp
@@ -14,6 +16,9 @@ logger = logging.getLogger(__name__)
 
 # yt-dlp 日志纳入统一管理
 _ytdl_logger = logging.getLogger("yt_dlp")
+
+# 检测 Node.js 路径（yt-dlp 需要 JS runtime 解析 YouTube player JS）
+_node_path = shutil.which("node") or "/opt/node22/bin/node"
 
 
 def _find_en_lang(subs_dict):
@@ -52,8 +57,16 @@ def _extract_subtitles(video_id):
         "no_warnings": True,
         "skip_download": True,
         "logger": _ytdl_logger,
-        "js_runtimes": "node:/opt/node22/bin/node",
     }
+
+    # Node.js runtime（消除 "No supported JavaScript runtime" 警告）
+    if os.path.isfile(_node_path):
+        ydl_opts["js_runtimes"] = f"node:{_node_path}"
+
+    # 代理支持（从环境变量读取）
+    proxy_url = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
+    if proxy_url:
+        ydl_opts["proxy"] = proxy_url
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
 

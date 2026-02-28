@@ -100,6 +100,13 @@ def main():
     for d in [DATA_DIR, PER_VIDEO_DATA_DIR, REPORTS_DIR, PER_VIDEO_REPORTS_DIR]:
         d.mkdir(parents=True, exist_ok=True)
 
+    # 代理检测
+    proxy_url = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
+    if proxy_url:
+        logger.info(f"检测到代理配置: {proxy_url}")
+    else:
+        logger.info("未配置代理（如需翻墙，请在 .env 中设置 HTTPS_PROXY）")
+
     youtube = init_youtube_client(api_key)
     llm = init_llm_client(dashscope_key)
 
