@@ -317,7 +317,7 @@ def main():
                 video["description"], full_text,
             )
 
-        time.sleep(1.0)
+        time.sleep(3.0)
 
         # 每 10 个视频保存一次检查点
         if (i + 1) % 10 == 0:

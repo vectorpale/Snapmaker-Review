@@ -7,7 +7,6 @@
 import json
 import logging
 import time
-import urllib.request
 
 import yt_dlp
 
@@ -53,53 +52,54 @@ def _extract_subtitles(video_id):
         "no_warnings": True,
         "skip_download": True,
         "logger": _ytdl_logger,
+        "js_runtimes": "node:/opt/node22/bin/node",
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=False)
 
-    manual_subs = info.get("subtitles", {})
-    auto_subs = info.get("automatic_captions", {})
+        manual_subs = info.get("subtitles", {})
+        auto_subs = info.get("automatic_captions", {})
 
-    # 确定字幕来源（优先英文，支持 en/en-US/en-GB/en-orig 等变体）
-    sub_lang = None
-    is_auto = False
-    sub_formats = None
-
-    en_manual = _find_en_lang(manual_subs)
-    if en_manual:
-        sub_lang = en_manual
+        # 确定字幕来源（优先英文，支持 en/en-US/en-GB/en-orig 等变体）
+        sub_lang = None
         is_auto = False
-        sub_formats = manual_subs[en_manual]
-    else:
-        en_auto = _find_en_lang(auto_subs)
-        if en_auto:
-            sub_lang = en_auto
-            is_auto = True
-            sub_formats = auto_subs[en_auto]
-        elif manual_subs:
-            sub_lang = next(iter(manual_subs))
+        sub_formats = None
+
+        en_manual = _find_en_lang(manual_subs)
+        if en_manual:
+            sub_lang = en_manual
             is_auto = False
-            sub_formats = manual_subs[sub_lang]
-        elif auto_subs:
-            for lang in auto_subs:
-                if lang != "live_chat":
-                    sub_lang = lang
-                    is_auto = True
-                    sub_formats = auto_subs[lang]
-                    break
+            sub_formats = manual_subs[en_manual]
+        else:
+            en_auto = _find_en_lang(auto_subs)
+            if en_auto:
+                sub_lang = en_auto
+                is_auto = True
+                sub_formats = auto_subs[en_auto]
+            elif manual_subs:
+                sub_lang = next(iter(manual_subs))
+                is_auto = False
+                sub_formats = manual_subs[sub_lang]
+            elif auto_subs:
+                for lang in auto_subs:
+                    if lang != "live_chat":
+                        sub_lang = lang
+                        is_auto = True
+                        sub_formats = auto_subs[lang]
+                        break
 
-    if not sub_lang or not sub_formats:
-        return None, "no_transcript"
+        if not sub_lang or not sub_formats:
+            return None, "no_transcript"
 
-    # 直接从 extract_info 返回的 URL 获取 json3 数据（无需第二次 yt-dlp 调用）
-    json3_url = _get_json3_url(sub_formats)
-    if not json3_url:
-        raise RuntimeError(
-            f"json3 格式不可用 (video={video_id}, lang={sub_lang})"
-        )
+        # 直接从 extract_info 返回的 URL 获取 json3 数据
+        # 使用 ydl.urlopen() 携带 session cookies/headers，避免 429 限流
+        json3_url = _get_json3_url(sub_formats)
+        if not json3_url:
+            raise RuntimeError(
+                f"json3 格式不可用 (video={video_id}, lang={sub_lang})"
+            )
 
-    req = urllib.request.Request(json3_url, headers={"Accept-Language": "en"})
-    with urllib.request.urlopen(req, timeout=30) as resp:
+        resp = ydl.urlopen(json3_url)
         sub_data = json.loads(resp.read().decode("utf-8"))
 
     # 解析 json3 格式为 entries
