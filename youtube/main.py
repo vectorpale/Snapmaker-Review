@@ -43,6 +43,7 @@ from llm_client import (
     analyze_comments_with_llm, generate_overall_with_llm,
 )
 from reports import generate_per_video_report, generate_overall_report
+from pdf_report import generate_pdf_report
 
 # --- 日志配置 ---
 logging.basicConfig(
@@ -624,6 +625,23 @@ def main():
     with open(report_path, "w", encoding="utf-8") as f:
         f.write(report_text)
     logger.info(f"总体报告已生成: {report_path}")
+
+    # ===== Step 10: 生成 PDF 产品分析报告 =====
+    logger.info("\nStep 10: 生成 PDF 产品分析报告")
+
+    try:
+        pdf_path = REPORTS_DIR / "snapmaker_u1_feedback_report.pdf"
+        generate_pdf_report(
+            top_videos=top_videos,
+            filter_stats=filter_stats,
+            df_comments=df_meaningful,
+            llm_results=llm_results,
+            overall_llm=overall_llm,
+            output_path=pdf_path,
+        )
+    except Exception as e:
+        logger.error(f"PDF 报告生成失败: {e}")
+        logger.error("Markdown 报告仍可用，PDF 生成为可选功能")
 
     # ===== 完成 =====
     logger.info("\n" + "=" * 60)

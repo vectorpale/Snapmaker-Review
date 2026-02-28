@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  @page {
+    size: A4;
+    margin: 2cm 1.5cm;
+    @bottom-center {
+      content: counter(page) " / " counter(pages);
+      font-size: 8pt;
+      color: #999;
+    }
+  }
+
+  body {
+    font-family: "WenQuanYi Zen Hei", "Noto Sans CJK SC", "Microsoft YaHei",
+                 "SimHei", "PingFang SC", sans-serif;
+    font-size: 10pt;
+    line-height: 1.6;
+    color: #333;
+  }
+
+  h1 { font-size: 20pt; color: #1a5276; margin-bottom: 8px; }
+  h2 { font-size: 15pt; color: #1a5276; border-bottom: 2px solid #2980b9;
+       padding-bottom: 4px; margin-top: 24px; page-break-after: avoid; }
+  h3 { font-size: 12pt; color: #2c3e50; margin-top: 16px; page-break-after: avoid; }
+
+  /* --- Cover Page --- */
+  .cover {
+    page-break-after: always;
+    text-align: center;
+    padding-top: 160px;
+  }
+  .cover h1 { font-size: 32pt; color: #1a5276; margin-bottom: 4px; }
+  .cover .product { font-size: 26pt; color: #2980b9; margin-bottom: 30px; }
+  .cover .subtitle { font-size: 13pt; color: #555; margin-bottom: 60px; }
+  .cover .meta { font-size: 10pt; color: #888; line-height: 2; }
+  .cover .meta-box {
+    display: inline-block;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 16px 32px;
+    margin-top: 40px;
+  }
+
+  /* --- Metrics Cards --- */
+  .metrics-row {
+    display: flex;
+    justify-content: space-between;
+    margin: 16px 0;
+    gap: 12px;
+  }
+  .metric-card {
+    flex: 1;
+    padding: 14px;
+    background: #f0f7ff;
+    border-radius: 6px;
+    text-align: center;
+    border-left: 4px solid #2980b9;
+  }
+  .metric-card .value { font-size: 22pt; font-weight: bold; color: #1a5276; }
+  .metric-card .label { font-size: 9pt; color: #666; margin-top: 2px; }
+
+  /* --- Tables --- */
+  table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 9pt; }
+  th { background: #2c3e50; color: white; padding: 6px 5px; text-align: left; }
+  td { padding: 5px; border-bottom: 1px solid #ddd; vertical-align: top; }
+  tr:nth-child(even) { background: #f9f9f9; }
+
+  /* --- Charts --- */
+  .chart-container { text-align: center; margin: 12px 0; page-break-inside: avoid; }
+  .chart-container img { max-width: 100%; }
+  .chart-row { display: flex; gap: 16px; margin: 12px 0; }
+  .chart-half { flex: 1; text-align: center; }
+  .chart-half img { max-width: 100%; }
+
+  /* --- LLM Content --- */
+  .llm-content {
+    background: #f8f9fa;
+    padding: 12px 16px;
+    border-radius: 6px;
+    margin: 8px 0;
+    font-size: 9.5pt;
+    line-height: 1.7;
+    white-space: pre-wrap;
+  }
+
+  /* --- Comment Cards --- */
+  .comment-card {
+    background: #fafafa;
+    border-left: 3px solid #ccc;
+    padding: 6px 10px;
+    margin: 6px 0;
+    font-size: 9pt;
+    page-break-inside: avoid;
+  }
+  .comment-card.positive { border-left-color: #27ae60; background: #f0faf0; }
+  .comment-card.negative { border-left-color: #e74c3c; background: #fdf0f0; }
+  .comment-card.neutral  { border-left-color: #95a5a6; }
+  .comment-card.question { border-left-color: #f39c12; background: #fef9f0; }
+  .comment-meta { color: #888; font-size: 8pt; margin-bottom: 2px; }
+
+  /* --- Video Cards --- */
+  .video-card {
+    border: 1px solid #e0e0e0;
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin: 8px 0;
+    page-break-inside: avoid;
+  }
+  .video-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 4px;
+  }
+  .video-card-header .channel { font-weight: bold; color: #1a5276; font-size: 10pt; }
+  .video-card-header .stats { font-size: 8pt; color: #888; }
+  .video-card-title { font-size: 9pt; color: #555; margin-bottom: 4px; }
+  .video-card-body { font-size: 9pt; color: #333; }
+
+  /* --- Badges --- */
+  .badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 7.5pt;
+    color: white;
+  }
+  .badge-sponsored { background: #e74c3c; }
+  .badge-sample    { background: #f39c12; }
+  .badge-affiliate { background: #8e44ad; }
+  .badge-self      { background: #27ae60; }
+  .badge-unknown   { background: #95a5a6; }
+
+  /* --- Sentiment Stats Table --- */
+  .sentiment-bar { display: inline-block; height: 14px; border-radius: 2px; vertical-align: middle; }
+  .bar-positive { background: #27ae60; }
+  .bar-negative { background: #e74c3c; }
+  .bar-neutral  { background: #95a5a6; }
+  .bar-mixed    { background: #f39c12; }
+
+  /* --- Section dividers --- */
+  .page-break { page-break-before: always; }
+
+  /* --- Utility --- */
+  .text-muted { color: #888; font-size: 8pt; }
+  .text-center { text-align: center; }
+  .mb-8 { margin-bottom: 8px; }
+  .mt-16 { margin-top: 16px; }
+</style>
+</head>
+<body>
+
+<!-- ==================== COVER PAGE ==================== -->
+<div class="cover">
+  <div class="product">Snapmaker U1</div>
+  <h1>YouTube 用户反馈分析报告</h1>
+  <p class="subtitle">Product Feedback Analysis Report</p>
+  <div class="meta-box">
+    <div class="meta">
+      生成日期: {{ generation_date }}<br>
+      数据范围: 2025-11-15 至今<br>
+      分析视频: {{ filter_stats.selected_count }} 个 |
+      有效评论: {{ total_comments | format_number }} 条 |
+      总观看量: {{ total_views | format_number }}
+    </div>
+  </div>
+</div>
+
+<!-- ==================== EXECUTIVE SUMMARY ==================== -->
+<h2>执行摘要</h2>
+
+<div class="metrics-row">
+  <div class="metric-card">
+    <div class="value">{{ filter_stats.selected_count }}</div>
+    <div class="label">评测视频</div>
+  </div>
+  <div class="metric-card">
+    <div class="value">{{ total_comments | format_number }}</div>
+    <div class="label">有效评论</div>
+  </div>
+  <div class="metric-card">
+    <div class="value">{{ total_views | format_number }}</div>
+    <div class="label">总观看量</div>
+  </div>
+  <div class="metric-card">
+    <div class="value">{{ transcript_success }}</div>
+    <div class="label">字幕成功</div>
+  </div>
+</div>
+
+{% if executive_summary %}
+<div class="llm-content">{{ executive_summary }}</div>
+{% endif %}
+
+<!-- ==================== SECTION 1: VIDEO ANALYSIS ==================== -->
+<div class="page-break"></div>
+<h2>第一部分：评测视频分析总结</h2>
+
+<h3>1.1 整体口碑评估</h3>
+{% if section_reputation %}
+<div class="llm-content">{{ section_reputation }}</div>
+{% else %}
+<div class="llm-content">{{ overall_text_fallback }}</div>
+{% endif %}
+
+<h3>1.2 产品优势汇总</h3>
+{% if charts.strengths_bar %}
+<div class="chart-container">
+  <img src="data:image/png;base64,{{ charts.strengths_bar }}" alt="优势统计">
+</div>
+{% endif %}
+{% if section_strengths %}
+<div class="llm-content">{{ section_strengths }}</div>
+{% endif %}
+
+<h3>1.3 缺点与待改进</h3>
+{% if charts.issues_bar %}
+<div class="chart-container">
+  <img src="data:image/png;base64,{{ charts.issues_bar }}" alt="问题统计">
+</div>
+{% endif %}
+{% if section_issues %}
+<div class="llm-content">{{ section_issues }}</div>
+{% endif %}
+
+{% if section_improvements %}
+<h3>1.4 改进优先级</h3>
+<div class="llm-content">{{ section_improvements }}</div>
+{% endif %}
+
+{% if section_competitive %}
+<h3>1.5 竞品定位</h3>
+<div class="llm-content">{{ section_competitive }}</div>
+{% endif %}
+
+<!-- Per-Video Summaries -->
+<div class="page-break"></div>
+<h3>1.6 各视频观点摘要</h3>
+<p class="text-muted">以下为各评测视频的核心观点（按观看量排序），作为上述总结的论据。</p>
+
+{% for v in video_summaries %}
+<div class="video-card">
+  <div class="video-card-header">
+    <span class="channel">{{ v.channel }}</span>
+    <span class="stats">
+      {{ v.view_count | format_number }} 次观看 |
+      {{ v.subscriber_count | format_subs }} 粉丝
+      {% if v.sponsor_type == 'sponsored' %}
+        <span class="badge badge-sponsored">赞助</span>
+      {% elif v.sponsor_type == 'review_sample' %}
+        <span class="badge badge-sample">样机</span>
+      {% elif v.sponsor_type == 'affiliate_only' %}
+        <span class="badge badge-affiliate">联盟</span>
+      {% elif v.sponsor_type == 'self_purchased' %}
+        <span class="badge badge-self">自购</span>
+      {% endif %}
+    </span>
+  </div>
+  <div class="video-card-title">{{ v.title }}</div>
+  <div class="video-card-body">{{ v.conclusion }}</div>
+</div>
+{% endfor %}
+
+<!-- ==================== SECTION 2: COMMENT SENTIMENT ==================== -->
+<div class="page-break"></div>
+<h2>第二部分：评论情感分析</h2>
+
+<h3>2.1 整体情感分布</h3>
+
+<!-- Sentiment summary table -->
+<table>
+  <tr>
+    <th>情感类别</th><th>评论数</th><th>占比</th><th>分布</th>
+  </tr>
+  {% for label, count, pct, css_class in sentiment_table %}
+  <tr>
+    <td>{{ label }}</td>
+    <td>{{ count }}</td>
+    <td>{{ pct }}%</td>
+    <td><span class="sentiment-bar bar-{{ css_class }}" style="width: {{ pct * 2 }}px;"></span></td>
+  </tr>
+  {% endfor %}
+</table>
+
+{% if charts.sentiment_pie %}
+<div class="chart-container">
+  <img src="data:image/png;base64,{{ charts.sentiment_pie }}" alt="情感分布">
+</div>
+{% endif %}
+
+<h3>2.2 各视频情感对比</h3>
+{% if charts.sentiment_by_video %}
+<div class="chart-container">
+  <img src="data:image/png;base64,{{ charts.sentiment_by_video }}" alt="各视频情感分布">
+</div>
+{% endif %}
+
+<h3>2.3 用户关注话题 Top 15</h3>
+{% if charts.topic_frequency %}
+<div class="chart-container">
+  <img src="data:image/png;base64,{{ charts.topic_frequency }}" alt="话题频率">
+</div>
+{% endif %}
+
+{% if topic_table %}
+<table>
+  <tr><th>#</th><th>话题</th><th>提及次数</th><th>正面</th><th>负面</th><th>中性</th></tr>
+  {% for row in topic_table %}
+  <tr>
+    <td>{{ loop.index }}</td>
+    <td>{{ row.topic }}</td>
+    <td>{{ row.count }}</td>
+    <td>{{ row.positive }}</td>
+    <td>{{ row.negative }}</td>
+    <td>{{ row.neutral }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+<!-- Comment examples by category -->
+<div class="page-break"></div>
+<h3>2.4 正面评论代表</h3>
+<p class="text-muted">以下为点赞最高的正面评论（共 {{ sentiment_counts.get('positive', 0) }} 条正面评论）</p>
+{% for c in comment_examples.positive %}
+<div class="comment-card positive">
+  <div class="comment-meta">{{ c.author }} | {{ c.like_count }} likes | {{ c.video_channel }}</div>
+  {{ c.text }}
+</div>
+{% endfor %}
+
+<h3>2.5 中性评论代表</h3>
+<p class="text-muted">共 {{ sentiment_counts.get('neutral', 0) }} 条中性评论</p>
+{% for c in comment_examples.neutral %}
+<div class="comment-card neutral">
+  <div class="comment-meta">{{ c.author }} | {{ c.like_count }} likes | {{ c.video_channel }}</div>
+  {{ c.text }}
+</div>
+{% endfor %}
+
+<h3>2.6 负面评论代表</h3>
+<p class="text-muted">共 {{ sentiment_counts.get('negative', 0) }} 条负面评论</p>
+{% for c in comment_examples.negative %}
+<div class="comment-card negative">
+  <div class="comment-meta">{{ c.author }} | {{ c.like_count }} likes | {{ c.video_channel }}</div>
+  {{ c.text }}
+</div>
+{% endfor %}
+
+<h3>2.7 用户疑问</h3>
+<p class="text-muted">以下为包含疑问的高赞评论</p>
+{% for c in comment_examples.questions %}
+<div class="comment-card question">
+  <div class="comment-meta">{{ c.author }} | {{ c.like_count }} likes | {{ c.video_channel }}</div>
+  {{ c.text }}
+</div>
+{% endfor %}
+
+<!-- ==================== APPENDIX ==================== -->
+<div class="page-break"></div>
+<h2>附录：视频索引</h2>
+<table>
+  <tr>
+    <th>#</th><th>频道</th><th>标题</th><th>观看量</th><th>点赞</th><th>评论</th><th>赞助</th>
+  </tr>
+  {% for v in top_videos %}
+  <tr>
+    <td>{{ loop.index }}</td>
+    <td>{{ v.channel }}</td>
+    <td>{{ v.title[:50] }}{% if v.title|length > 50 %}...{% endif %}</td>
+    <td>{{ v.view_count | format_number }}</td>
+    <td>{{ v.like_count | format_number }}</td>
+    <td>{{ v.comment_count }}</td>
+    <td>
+      {% set st = v.sponsor_status.sponsor_type if v.sponsor_status else 'unknown' %}
+      {% if st == 'sponsored' %}<span class="badge badge-sponsored">赞助</span>
+      {% elif st == 'review_sample' %}<span class="badge badge-sample">样机</span>
+      {% elif st == 'self_purchased' %}<span class="badge badge-self">自购</span>
+      {% elif st == 'affiliate_only' %}<span class="badge badge-affiliate">联盟</span>
+      {% else %}<span class="badge badge-unknown">未知</span>
+      {% endif %}
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+
+</body>
+</html>
