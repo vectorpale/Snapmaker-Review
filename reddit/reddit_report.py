@@ -307,6 +307,28 @@ def compute_all_engagement(posts):
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 数据加载
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def load_data():
+    """从 reddit_u1_data.json 加载爬取的数据"""
+    if not os.path.exists(DATA_FILE):
+        print(f"[错误] 数据文件不存在: {DATA_FILE}")
+        print("请先运行 reddit_scraper.py 爬取数据，或使用 --sample 参数生成示例报告")
+        sys.exit(1)
+
+    with open(DATA_FILE, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    # 兼容两种格式：直接是列表，或者是 {"posts": [...]} 字典
+    if isinstance(data, list):
+        data = {"posts": data}
+
+    print(f"[数据] 已加载: {DATA_FILE}")
+    return data
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 示例数据（用于无真实数据时的报告演示）
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
