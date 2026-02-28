@@ -82,6 +82,14 @@ def main():
                 text = raw.decode('utf-16').strip()
                 env_path.write_text(text + '\n', encoding='utf-8')
                 logger.info("已将 .env 从 UTF-16 转换为 UTF-8")
+            else:
+                # 尝试 UTF-8 解码，失败则按 GBK 解码并转换
+                try:
+                    raw.decode('utf-8')
+                except UnicodeDecodeError:
+                    text = raw.decode('gbk', errors='replace').strip()
+                    env_path.write_text(text + '\n', encoding='utf-8')
+                    logger.info("已将 .env 从 GBK 转换为 UTF-8")
         except Exception:
             pass
     load_dotenv(env_path)
