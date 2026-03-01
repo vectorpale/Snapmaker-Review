@@ -257,7 +257,7 @@ NEGATIVE_KW = [
 
 # --- 视频筛选 ---
 MIN_VIEW_COUNT = 10_000      # 最低播放量
-TOP_N_VIDEOS = 30            # 分析前 N 个视频
+TOP_N_VIDEOS = 50            # 分析前 N 个视频
 
 # --- LLM 配置（OpenAI 兼容接口，支持阿里云 Qwen / OpenAI / 其他兼容服务）---
 # 通过环境变量覆盖：LLM_BASE_URL, LLM_MODEL

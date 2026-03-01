@@ -45,6 +45,7 @@ from llm_client import (
 from reports import generate_per_video_report, generate_overall_report
 
 from pptx_report import generate_pptx_report
+from excel_report import generate_excel_report
 
 # --- 日志配置 ---
 logging.basicConfig(
@@ -444,33 +445,43 @@ def main():
     logger.info("\nStep 5: 获取评论")
 
     cached = load_checkpoint("all_comments")
-    if cached:
-        all_comments = cached
-    else:
-        all_comments = []
-        for i, video in enumerate(top_videos):
-            vid = video["video_id"]
-            if video["comment_count"] == 0:
-                continue
-            max_c = 500
-            logger.info(
-                f"[{i + 1}/{len(top_videos)}] 评论: "
-                f"{video['channel'][:18]} - {video['title'][:40]}... "
-                f"(max {max_c})"
-            )
-            comments = get_all_comments(youtube, vid, max_comments=max_c)
-            all_comments.extend(comments)
-            top_level = [c for c in comments if not c["is_reply"]]
-            replies = [c for c in comments if c["is_reply"]]
-            logger.info(
-                f"  -> {len(top_level)} 顶层 + {len(replies)} 回复 = "
-                f"{len(comments)} 条"
-            )
-            time.sleep(0.5)
+    all_comments = cached if cached else []
 
+    # 按视频 ID 跳过已获取的评论（支持增量扩展）
+    existing_comment_vids = set(c["video_id"] for c in all_comments)
+    new_fetched = 0
+
+    for i, video in enumerate(top_videos):
+        vid = video["video_id"]
+        if vid in existing_comment_vids:
+            logger.info(
+                f"[{i + 1}/{len(top_videos)}] 跳过已获取评论: "
+                f"{video['channel'][:18]}"
+            )
+            continue
+        if video["comment_count"] == 0:
+            continue
+        max_c = 500
+        logger.info(
+            f"[{i + 1}/{len(top_videos)}] 评论: "
+            f"{video['channel'][:18]} - {video['title'][:40]}... "
+            f"(max {max_c})"
+        )
+        comments = get_all_comments(youtube, vid, max_comments=max_c)
+        all_comments.extend(comments)
+        new_fetched += len(comments)
+        top_level = [c for c in comments if not c["is_reply"]]
+        replies = [c for c in comments if c["is_reply"]]
+        logger.info(
+            f"  -> {len(top_level)} 顶层 + {len(replies)} 回复 = "
+            f"{len(comments)} 条"
+        )
+        time.sleep(0.5)
+
+    if new_fetched > 0:
         save_checkpoint("all_comments", all_comments)
 
-    logger.info(f"评论获取完成: {len(all_comments)} 条")
+    logger.info(f"评论获取完成: {len(all_comments)} 条（本次新增 {new_fetched}）")
 
     # ===== Step 6: 评论基础分析（关键词标注） =====
     logger.info("\nStep 6: 评论基础分析（关键词标注）")
@@ -610,11 +621,22 @@ def main():
     logger.info("\nStep 9: 生成总体报告（LLM 综合分析）")
 
     cached_overall = load_checkpoint("overall_llm_analysis")
+    # 当视频数量变化时（如从 30 扩展到 50），自动重新生成综合分析
+    if cached_overall and cached_overall.get("status") == "success":
+        cached_video_count = cached_overall.get("video_count", 0)
+        if cached_video_count != len(top_videos):
+            logger.info(
+                f"视频数量变化 ({cached_video_count} -> {len(top_videos)})，"
+                f"重新生成综合分析"
+            )
+            cached_overall = None
+
     if cached_overall and cached_overall.get("status") == "success":
         overall_llm = cached_overall
         logger.info("从检查点加载综合分析结果（跳过 LLM 调用）")
     else:
         overall_llm = generate_overall_with_llm(llm, llm_results, top_videos)
+        overall_llm["video_count"] = len(top_videos)
         save_checkpoint("overall_llm_analysis", overall_llm)
     logger.info(f"LLM 综合分析: {overall_llm['status']}")
 
@@ -650,6 +672,23 @@ def main():
     except Exception as e:
         logger.error(f"PowerPoint 报告生成失败: {e}")
         logger.error("Markdown 报告仍可用，PPTX 生成为可选功能")
+
+    # ===== Step 11: 生成 Excel 数据分析报告 =====
+    logger.info("\nStep 11: 生成 Excel 数据分析报告")
+
+    try:
+        xlsx_path = REPORTS_DIR / "snapmaker_u1_feedback_data.xlsx"
+        generate_excel_report(
+            top_videos=top_videos,
+            filter_stats=filter_stats,
+            df_comments=df_meaningful,
+            llm_results=llm_results,
+            overall_llm=overall_llm,
+            output_path=xlsx_path,
+        )
+    except Exception as e:
+        logger.error(f"Excel 报告生成失败: {e}")
+        logger.error("Markdown 报告仍可用，Excel 生成为可选功能")
 
     # ===== 完成 =====
     logger.info("\n" + "=" * 60)
