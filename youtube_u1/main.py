@@ -44,17 +44,7 @@ from llm_client import (
 )
 from reports import generate_per_video_report, generate_overall_report
 
-try:
-    from pdf_report import generate_pdf_report
-    HAS_WEASYPRINT = True
-except ImportError:
-    HAS_WEASYPRINT = False
-
-try:
-    from pptx_report import generate_pptx_report
-    HAS_PPTX = True
-except ImportError:
-    HAS_PPTX = False
+from pptx_report import generate_pptx_report
 
 # --- 日志配置 ---
 logging.basicConfig(
@@ -637,51 +627,22 @@ def main():
         f.write(report_text)
     logger.info(f"总体报告已生成: {report_path}")
 
-    # ===== Step 10: 生成 PDF 产品分析报告 =====
-    logger.info("\nStep 10: 生成 PDF 产品分析报告")
+    # ===== Step 10: 生成 PowerPoint 产品分析报告 =====
+    logger.info("\nStep 10: 生成 PowerPoint 产品分析报告")
 
-    if HAS_WEASYPRINT:
-        try:
-            pdf_path = REPORTS_DIR / "snapmaker_u1_feedback_report.pdf"
-            generate_pdf_report(
-                top_videos=top_videos,
-                filter_stats=filter_stats,
-                df_comments=df_meaningful,
-                llm_results=llm_results,
-                overall_llm=overall_llm,
-                output_path=pdf_path,
-            )
-        except Exception as e:
-            logger.error(f"PDF 报告生成失败: {e}")
-            logger.error("Markdown 报告仍可用，PDF 生成为可选功能")
-    else:
-        logger.warning(
-            "跳过 PDF 生成: 未安装 weasyprint。"
-            "如需 PDF 报告，请运行: pip install weasyprint"
+    try:
+        pptx_path = REPORTS_DIR / "snapmaker_u1_feedback_report.pptx"
+        generate_pptx_report(
+            top_videos=top_videos,
+            filter_stats=filter_stats,
+            df_comments=df_meaningful,
+            llm_results=llm_results,
+            overall_llm=overall_llm,
+            output_path=pptx_path,
         )
-
-    # ===== Step 11: 生成 PowerPoint 产品分析报告 =====
-    logger.info("\nStep 11: 生成 PowerPoint 产品分析报告")
-
-    if HAS_PPTX:
-        try:
-            pptx_path = REPORTS_DIR / "snapmaker_u1_feedback_report.pptx"
-            generate_pptx_report(
-                top_videos=top_videos,
-                filter_stats=filter_stats,
-                df_comments=df_meaningful,
-                llm_results=llm_results,
-                overall_llm=overall_llm,
-                output_path=pptx_path,
-            )
-        except Exception as e:
-            logger.error(f"PowerPoint 报告生成失败: {e}")
-            logger.error("其他格式报告仍可用，PPTX 生成为可选功能")
-    else:
-        logger.warning(
-            "跳过 PowerPoint 生成: 未安装 python-pptx。"
-            "如需 PPTX 报告，请运行: pip install python-pptx"
-        )
+    except Exception as e:
+        logger.error(f"PowerPoint 报告生成失败: {e}")
+        logger.error("Markdown 报告仍可用，PPTX 生成为可选功能")
 
     # ===== 完成 =====
     logger.info("\n" + "=" * 60)

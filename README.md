@@ -21,7 +21,6 @@
 | Bambu 对比 | 通用竞品章节 | 专属 Bambu 对比章节（视频+评论） |
 | 评论过滤 | 所有评论 | 只统计 U1 相关评论 |
 | 数据支撑 | 定性描述 | 要求具体数量/占比/频道名 |
-| PDF | xhtml2pdf（字体有问题） | WeasyPrint（中文支持好） |
 | PowerPoint | 无 | 自动生成 PPTX 报告 |
 | LLM 超时 | 默认超时 | 600s 超时 + 16K 输出 tokens |
 
@@ -48,7 +47,6 @@ LLM_API_KEY=your_dashscope_api_key
 
 ```bash
 pip install -r requirements.txt
-pip install weasyprint python-pptx  # youtube_u1/ 额外需要
 ```
 
 ## 运行
@@ -72,8 +70,7 @@ python main.py
 | 7 | LLM 深度分析 | `data/llm_analysis.json` |
 | 8 | 生成单视频报告 | `reports/per_video/*.md` |
 | 9 | 生成综合报告 | `reports/youtube_analysis_report.md` |
-| 10 | 生成 PDF 报告 | `reports/snapmaker_u1_feedback_report.pdf` |
-| 11 | 生成 PowerPoint 报告 | `reports/snapmaker_u1_feedback_report.pptx` |
+| 10 | 生成 PowerPoint 报告 | `reports/snapmaker_u1_feedback_report.pptx` |
 
 ### 断点续跑
 
@@ -104,6 +101,5 @@ python main.py
 ## 输出报告
 
 - **Markdown 综合报告** — 最完整的文本报告
-- **PDF 报告** — 适合打印和分享，含图表
-- **PowerPoint 报告** — 适合汇报演示
+- **PowerPoint 报告** — 适合汇报演示（可自行导出 PDF）
 - **单视频详情报告** — 每个视频的独立分析（Markdown）
