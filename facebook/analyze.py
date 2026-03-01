@@ -13,10 +13,10 @@ Snapmaker U1 Facebook 用户反馈分析工具
     python analyze.py <input.json> --llm --output ./reports/
 
 分析流程:
-    1. 主贴五分类: 问题/求助、打印结果展示、正面评价、负面评价、无意义
-    2. 正面评价子分类及量化统计
-    3. 负面评价子分类及量化统计
-    4. 问题/求助子分类及量化统计
+    1. 主贴五分类: 问题/求助、打印结果展示、正面反馈、负面反馈、其他内容
+    2. 正面反馈子分类及量化统计（允许多标签）
+    3. 负面反馈子分类及量化统计（允许多标签）
+    4. 问题/求助子分类及量化统计（MECE 单标签）
     5. 生成含饼图/条形图的 PPTX 报告（简体中文）
 """
 
@@ -37,9 +37,9 @@ from sentiment import SentimentAnalyzer
 PRIMARY_CATEGORIES = {
     "问题/求助": "Questions / Help",
     "打印结果展示/晒作品": "Print Showcase",
-    "正面评价": "Positive Reviews",
-    "负面评价": "Negative Reviews",
-    "无意义": "Irrelevant",
+    "正面反馈": "Positive Feedback",
+    "负面反馈": "Negative Feedback",
+    "其他内容": "Other Content",
 }
 
 # 用于关键词回退分类的规则映射
@@ -64,7 +64,7 @@ _KEYWORD_PRIMARY_MAP = {
             "晒", "成品", "打印了",
         ],
     },
-    "正面评价": {
+    "正面反馈": {
         "top_codes": {"P"},
         "sentiment": {"positive"},
         "keywords": [
@@ -74,7 +74,7 @@ _KEYWORD_PRIMARY_MAP = {
             "好评", "推荐", "满意",
         ],
     },
-    "负面评价": {
+    "负面反馈": {
         "top_codes": set(),
         "sentiment": {"negative"},
         "keywords": [
@@ -136,21 +136,21 @@ def _keyword_primary_classify(post: dict, classification: dict,
         scores["打印结果展示/晒作品"] += 1
 
     if not scores:
-        return "无意义"
+        return "其他内容"
 
     # 分类优先级调整
     best_cat = scores.most_common(1)[0][0]
 
-    # 如果同时匹配了 "问题/求助" 和 "负面评价"，看是在求助还是在抱怨
-    if scores.get("问题/求助", 0) > 0 and scores.get("负面评价", 0) > 0:
+    # 如果同时匹配了 "问题/求助" 和 "负面反馈"，看是在求助还是在抱怨
+    if scores.get("问题/求助", 0) > 0 and scores.get("负面反馈", 0) > 0:
         # 有明确的求助词汇 → 问题/求助
         help_words = ["help", "how to", "anyone know", "stuck", "求助"]
         if any(w in text for w in help_words):
             best_cat = "问题/求助"
-        # 有强烈的抱怨词汇 → 负面评价
+        # 有强烈的抱怨词汇 → 负面反馈
         complaint_words = ["disappointed", "frustrat", "regret", "terrible", "returning"]
         if any(w in text for w in complaint_words):
-            best_cat = "负面评价"
+            best_cat = "负面反馈"
 
     return best_cat
 
@@ -187,7 +187,7 @@ def analyze_posts(posts: list, classifier: FeedbackClassifier,
             for i, result in enumerate(results):
                 if i < len(llm_results):
                     llm_r = llm_results[i]
-                    cat = llm_r.get("category", "无意义")
+                    cat = llm_r.get("category", "其他内容")
                     if cat in PRIMARY_CATEGORIES:
                         result["primary_category"] = cat
                     else:
@@ -230,19 +230,19 @@ def analyze_subcategories_with_llm(analyzed_posts: list, llm_client) -> dict:
     sub_results = {"positive": [], "negative": [], "issue": []}
 
     # 按主贴类别分组
-    positive_posts = [p for p in analyzed_posts if p.get("primary_category") == "正面评价"]
-    negative_posts = [p for p in analyzed_posts if p.get("primary_category") == "负面评价"]
+    positive_posts = [p for p in analyzed_posts if p.get("primary_category") == "正面反馈"]
+    negative_posts = [p for p in analyzed_posts if p.get("primary_category") == "负面反馈"]
     issue_posts = [p for p in analyzed_posts if p.get("primary_category") == "问题/求助"]
 
     if positive_posts:
-        print(f"\n  正面评价子分类 ({len(positive_posts)} 个帖子)...")
+        print(f"\n  正面反馈子分类 ({len(positive_posts)} 个帖子)...")
         try:
             sub_results["positive"] = llm_client.analyze_subcategories(positive_posts, "positive")
         except Exception as e:
             print(f"    失败: {e}")
 
     if negative_posts:
-        print(f"\n  负面评价子分类 ({len(negative_posts)} 个帖子)...")
+        print(f"\n  负面反馈子分类 ({len(negative_posts)} 个帖子)...")
         try:
             sub_results["negative"] = llm_client.analyze_subcategories(negative_posts, "negative")
         except Exception as e:
@@ -259,22 +259,33 @@ def analyze_subcategories_with_llm(analyzed_posts: list, llm_client) -> dict:
 
 
 def _aggregate_subcategories(sub_results: List[Dict]) -> Dict[str, Dict]:
-    """聚合子分类结果（MECE：每帖仅1个子类别），统计各子类别数量和代表性用户原声。"""
+    """聚合子分类结果，统计各子类别数量和代表性用户原声。
+
+    支持两种格式：
+    - 多标签：subcategories 为数组（正面反馈/负面反馈），总数可超过帖子数
+    - 单标签：subcategory 为字符串（问题/求助），总数 = 帖子数
+    """
     category_data = defaultdict(lambda: {"count": 0, "quotes": []})
 
     for item in sub_results:
-        # MECE: 优先使用单一 subcategory 字段
-        subcat = item.get("subcategory")
-        if not subcat:
-            # 兼容旧格式：取列表第一个
-            subcats = item.get("subcategories", ["未分类"])
-            subcat = subcats[0] if subcats else "未分类"
-
         quote = item.get("representative_quote", "")
 
-        category_data[subcat]["count"] += 1
-        if quote and len(category_data[subcat]["quotes"]) < 3:
-            category_data[subcat]["quotes"].append(quote)
+        # 优先使用多标签格式 subcategories（数组）
+        subcats = item.get("subcategories")
+        if subcats and isinstance(subcats, list):
+            for subcat in subcats:
+                if subcat:
+                    category_data[subcat]["count"] += 1
+                    if quote and len(category_data[subcat]["quotes"]) < 3:
+                        category_data[subcat]["quotes"].append(quote)
+        else:
+            # 单标签格式 subcategory（字符串）
+            subcat = item.get("subcategory", "未分类")
+            if not subcat:
+                subcat = "未分类"
+            category_data[subcat]["count"] += 1
+            if quote and len(category_data[subcat]["quotes"]) < 3:
+                category_data[subcat]["quotes"].append(quote)
 
     # 排序：按数量降序
     sorted_data = dict(
@@ -313,7 +324,7 @@ def build_summary(analyzed_posts: list, raw_data: dict,
     }
 
     # ── 主贴五分类分布 ──
-    primary_counter = Counter(p.get("primary_category", "无意义") for p in analyzed_posts)
+    primary_counter = Counter(p.get("primary_category", "其他内容") for p in analyzed_posts)
     primary_distribution = {}
     for cat in PRIMARY_CATEGORIES:
         primary_distribution[cat] = primary_counter.get(cat, 0)
@@ -335,8 +346,8 @@ def build_summary(analyzed_posts: list, raw_data: dict,
             for p in sorted_posts[:n]
         ]
 
-    positive_quotes = _get_top_quotes(category_groups.get("正面评价", []))
-    negative_quotes = _get_top_quotes(category_groups.get("负面评价", []))
+    positive_quotes = _get_top_quotes(category_groups.get("正面反馈", []))
+    negative_quotes = _get_top_quotes(category_groups.get("负面反馈", []))
     issue_quotes = _get_top_quotes(category_groups.get("问题/求助", []))
 
     # ── LLM 子分类聚合 ──
@@ -354,10 +365,10 @@ def build_summary(analyzed_posts: list, raw_data: dict,
     else:
         # 回退：使用细粒度分类结果聚合
         positive_subcategories = _fallback_subcategories(
-            category_groups.get("正面评价", []), "P"
+            category_groups.get("正面反馈", []), "P"
         )
         negative_subcategories = _fallback_subcategories(
-            category_groups.get("负面评价", []), "H,S,M,U"
+            category_groups.get("负面反馈", []), "H,S,M,U"
         )
         issue_subcategories = _fallback_subcategories(
             category_groups.get("问题/求助", []), "H,S,M,U"

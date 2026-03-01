@@ -20,21 +20,20 @@ except ImportError:
 PRIMARY_CLASSIFY_PROMPT = """你是一个专业的用户反馈分析师。请对以下来自 Snapmaker U1 3D打印机 Facebook 用户群的帖子进行分类。
 
 【重要】分类必须遵循 MECE 原则（互斥且完全穷尽）：每个帖子有且仅归入以下5个类别中的1个：
-1. 问题/求助 - 用户遇到了问题需要帮助、报告了故障或BUG、寻求技术支持
-2. 打印结果展示/晒作品 - 用户展示自己的3D打印成品、分享作品照片、show & tell
-3. 正面评价 - 用户对产品、服务或体验表达正面评价和赞赏（不含展示作品）
-4. 负面评价 - 用户对产品、服务或体验表达不满、抱怨或批评（区别于"问题/求助"：这里的重点是抱怨情绪而非寻求帮助）
-5. 无意义 - 无法归入以上类别，或内容不相关、纯转发、广告等
+1. 问题/求助 — 用户遇到了具体问题需要帮助，核心目的是寻求解决方案（如报告故障、提问技术问题）
+2. 打印结果展示/晒作品 — 以展示3D打印成品照片/视频为主要内容（show & tell）
+3. 正面反馈 — 对产品、服务或体验表达正面评价和赞赏（不含纯作品展示）
+4. 负面反馈 — 对产品、服务或体验表达不满、抱怨或批评（重点是情绪表达，而非寻求技术帮助）
+5. 其他内容 — 无法归入以上类别的内容，如纯转发、广告、不相关讨论等
 
-判断优先级提示：
-- 如果帖子主要目的是展示打印成品/照片 → "打印结果展示/晒作品"
-- 如果帖子在求助/提问/报错 → "问题/求助"
-- 如果帖子主要是表达不满/抱怨 → "负面评价"
-- 如果帖子主要是表达满意/称赞 → "正面评价"
+【分类边界判定】
+- "问题/求助" vs "负面反馈"：看帖子的核心目的——如果是在求解决方案→问题/求助；如果是在宣泄不满→负面反馈
+- "打印结果展示" vs "正面反馈"：看内容载体——如果以展示打印成品图片为主→打印结果展示；如果以文字评价为主→正面反馈
+- 优先级阶梯（边缘情况）：问题/求助 > 打印结果展示 > 负面反馈 > 正面反馈 > 其他内容
 
 请以JSON格式返回结果，格式为：
 {
-  "category": "问题/求助" 或 "打印结果展示/晒作品" 或 "正面评价" 或 "负面评价" 或 "无意义",
+  "category": "问题/求助" 或 "打印结果展示/晒作品" 或 "正面反馈" 或 "负面反馈" 或 "其他内容",
   "confidence": 0.0-1.0,
   "brief_reason": "简短分类理由"
 }
@@ -42,56 +41,61 @@ PRIMARY_CLASSIFY_PROMPT = """你是一个专业的用户反馈分析师。请对
 帖子内容：
 """
 
-POSITIVE_SUBCATEGORY_PROMPT = """你是一个专业的用户反馈分析师。以下是来自 Snapmaker U1 3D打印机用户群的正面评价帖子。
+POSITIVE_SUBCATEGORY_PROMPT = """你是一个专业的用户反馈分析师。以下是来自 Snapmaker U1 3D打印机用户群的正面反馈帖子。
 
-【重要】子分类必须遵循 MECE 原则：每个帖子只归入1个最主要的子类别。
+【重要】一个帖子可能涉及多个正面维度，请选出1-3个最相关的子类别（允许多选）。
 
-正面评价子类别（MECE，选其一）：
-1. 打印质量好 (Print Quality) - 打印精度高、表面光滑、细节清晰
-2. 多色打印效果好 (Multi-color Printing) - 多色/多材料打印效果惊艳
-3. 换头速度快/浪费少 (Fast Tool Change / Less Waste) - 工具头切换快、耗材浪费少
-4. 性价比高 (Good Value for Money) - 物有所值、价格合理
-5. 设置简单/易用 (Easy Setup / User Friendly) - 安装简单、操作友好、开箱即用
-6. 客服/售后好 (Good Customer Service) - 技术支持响应快、售后服务好
-7. 外观设计/做工好 (Good Build Quality) - 机器外观、做工、用料好
-8. 安静/噪音小 (Low Noise) - 运行安静
-9. 打印速度快 (Fast Printing Speed) - 打印速度令人满意
-10. 社区互助好 (Great Community) - 感谢社区帮助、分享知识
-11. 其他正面 (Other Positive) - 以上类别无法覆盖的正面评价
+正面反馈子类别（编号 + 名称 + 定义）：
+P-01 打印质量好 (Print Quality) — 打印精度高、表面光滑、细节清晰、尺寸准确
+P-02 多色打印效果好 (Multi-color Printing) — 多色/多材料打印的颜色过渡自然、对齐精准、整体效果惊艳
+P-03 换色效率高 (Efficient Color Change) — 工具头切换速度快、换色过程耗材浪费少
+P-04 性价比高 (Good Value for Money) — 相对价格功能丰富、物有所值
+P-05 设置简单/易用 (Easy Setup / User Friendly) — 开箱组装简单、日常操作便捷、学习成本低
+P-06 客服/售后好 (Good Customer Service) — 技术支持响应及时、售后问题处理令人满意
+P-07 外观设计/做工好 (Good Build Quality) — 机器外观美观、结构用料扎实、做工精细
+P-08 安静/噪音小 (Low Noise) — 运行噪音低、不影响正常生活/工作环境
+P-09 打印速度快 (Fast Printing Speed) — 打印速度令人满意、效率高
+P-10 社区/生态好 (Great Community / Ecosystem) — 用户社区活跃、资源丰富、互助氛围好
+P-11 其他正面 (Other Positive) — 以上类别无法覆盖的正面评价
 
 对每个帖子，返回JSON格式：
 {
-  "subcategory": "选择1个最主要的子类别名称",
+  "subcategories": ["P-01 打印质量好", "P-02 多色打印效果好"],
   "representative_quote": "最能代表该正面评价的原始文字片段（英文原文）",
   "summary": "一句话中文总结"
 }
 
+注意：subcategories 为数组，选1-3个最相关的子类别，使用"编号 名称"格式（如"P-01 打印质量好"）。
+
 帖子列表（JSON数组）：
 """
 
-NEGATIVE_SUBCATEGORY_PROMPT = """你是一个专业的用户反馈分析师。以下是来自 Snapmaker U1 3D打印机用户群的负面评价帖子。
+NEGATIVE_SUBCATEGORY_PROMPT = """你是一个专业的用户反馈分析师。以下是来自 Snapmaker U1 3D打印机用户群的负面反馈帖子。
 
-【重要】子分类必须遵循 MECE 原则：每个帖子只归入1个最主要的子类别。
+【重要】一个帖子可能涉及多个负面维度，请选出1-3个最相关的子类别（允许多选）。
 
-负面评价子类别（MECE，选其一）：
-1. 硬件质量/做工差 (Hardware Quality Issues) - 机械部件、外壳、导轨等质量问题
-2. 软件/固件问题 (Software / Firmware Issues) - 切片软件、固件BUG、APP崩溃等
-3. 打印质量不佳 (Poor Print Quality) - 拉丝、层偏移、表面粗糙等打印缺陷
-4. 售后服务差 (Poor Customer Service) - 客服不回应、维修慢、态度差
-5. 物流/发货问题 (Shipping / Delivery Issues) - 发货慢、包装损坏、配件缺失
-6. 噪音大 (Noisy) - 运行噪音大、振动严重
-7. 耗材兼容性差 (Material Compatibility) - 第三方耗材不兼容、堵料
-8. 可靠性/故障率高 (Reliability / High Failure Rate) - 频繁故障、需要经常维修
-9. 校准/设置困难 (Calibration Difficulty) - 校准复杂、多次失败
-10. 性价比低 (Poor Value) - 觉得不值这个价格
-11. 其他负面 (Other Negative) - 以上类别无法覆盖的负面评价
+负面反馈子类别（编号 + 名称 + 定义）：
+N-01 硬件质量/做工差 (Hardware Quality Issues) — 机械部件、外壳、导轨等静态质量缺陷（收到时即存在的问题）
+N-02 软件/固件问题 (Software / Firmware Issues) — 切片软件BUG、固件更新失败、APP崩溃等软件层面问题
+N-03 打印质量不佳 (Poor Print Quality) — 拉丝、层偏移、表面粗糙、翘曲等打印成品缺陷
+N-04 售后服务差 (Poor Customer Service) — 客服不回应、维修周期长、处理态度差
+N-05 物流/发货问题 (Shipping / Delivery Issues) — 发货慢、运输途中损坏、配件缺失
+N-06 噪音大 (Noisy) — 运行噪音大、振动明显、影响使用环境
+N-07 耗材兼容性差 (Material Compatibility) — 第三方耗材不兼容、频繁堵料
+N-08 稳定性差/频繁故障 (Poor Reliability / Frequent Failures) — 使用过程中频繁出现故障、需要经常维修（区别于N-01：N-01是出厂缺陷，N-08是使用中的可靠性问题）
+N-09 校准/设置困难 (Calibration Difficulty) — 校准流程复杂、多次失败、初始设置繁琐
+N-10 性价比低 (Poor Value) — 功能与价格不匹配、觉得不值
+N-11 工具头/换头问题 (Toolhead / Tool Change Issues) — 工具头拾取失败、换头过程故障、碰撞等
+N-12 其他负面 (Other Negative) — 以上类别无法覆盖的负面评价
 
 对每个帖子，返回JSON格式：
 {
-  "subcategory": "选择1个最主要的子类别名称",
+  "subcategories": ["N-01 硬件质量/做工差", "N-08 稳定性差/频繁故障"],
   "representative_quote": "最能代表该负面评价的原始文字片段（英文原文）",
   "summary": "一句话中文总结"
 }
+
+注意：subcategories 为数组，选1-3个最相关的子类别，使用"编号 名称"格式（如"N-01 硬件质量/做工差"）。
 
 帖子列表（JSON数组）：
 """
@@ -100,24 +104,26 @@ ISSUE_SUBCATEGORY_PROMPT = """你是一个专业的用户反馈分析师。以�
 
 【重要】子分类必须遵循 MECE 原则：每个帖子只归入1个最主要的子类别。
 
-问题/求助子类别（MECE，选其一）：
-1. 工具头问题 (Toolhead Issues) - 拾取/停放失败、校准偏移、碰撞、加热异常
-2. 打印质量问题 (Print Quality Issues) - 拉丝、层偏移、首层附着力、翘曲、表面缺陷
-3. 机械结构问题 (Mechanical Issues) - 外壳松脱、导轨磨损、皮带噪音、风扇故障
-4. 电气/连接问题 (Electrical/Connection) - WiFi断连、USB故障、电源问题、传感器失灵
-5. 软件/固件问题 (Software/Firmware) - 切片软件BUG、固件更新问题、APP异常
-6. 耗材问题 (Material Issues) - 耗材兼容性、堵料、送料异常、受潮
-7. 使用咨询 (Usage Questions) - 设置方法、参数调整、功能咨询
-8. 购买/配件咨询 (Purchase / Accessories) - 购买建议、配件推荐、兼容性咨询
-9. 售后支持问题 (After-sales Support) - 客服响应、保修、退换货
-10. 其他问题 (Other Issues) - 以上类别无法覆盖的问题
+问题/求助子类别（编号 + 名称 + 定义，MECE，选其一）：
+I-01 工具头问题 (Toolhead Issues) — 工具头拾取/停放失败、校准偏移、碰撞、加热异常
+I-02 打印质量问题 (Print Quality Issues) — 拉丝、层偏移、首层附着力差、翘曲、表面缺陷
+I-03 机械结构问题 (Mechanical Issues) — 外壳松脱、导轨磨损、皮带异响、风扇故障
+I-04 电气/连接问题 (Electrical / Connection) — WiFi断连、USB通信故障、电源异常、传感器失灵
+I-05 软件/固件问题 (Software / Firmware) — 切片软件BUG、固件更新失败、APP异常
+I-06 耗材问题 (Material Issues) — 耗材兼容性、堵料、送料异常、耗材受潮
+I-07 使用方法咨询 (Usage Questions) — 设置方法、打印参数调整、功能使用咨询
+I-08 购买/配件咨询 (Purchase / Accessories) — 购买建议、配件推荐、兼容性咨询
+I-09 售后支持 (After-sales Support) — 客服响应、保修政策、退换货流程
+I-10 其他问题 (Other Issues) — 以上类别无法覆盖的问题
 
 对每个帖子，返回JSON格式：
 {
-  "subcategory": "选择1个最主要的子类别名称",
+  "subcategory": "I-01 工具头问题",
   "representative_quote": "最能代表该问题的原始文字片段（英文原文）",
   "summary": "一句话中文总结"
 }
+
+注意：subcategory 为单一字符串，使用"编号 名称"格式（如"I-01 工具头问题"）。
 
 帖子列表（JSON数组）：
 """
@@ -199,7 +205,7 @@ class LLMClient:
         except (json.JSONDecodeError, Exception) as e:
             print(f"  Warning: Failed to parse LLM classification result: {e}")
             return {
-                "category": "无意义",
+                "category": "其他内容",
                 "confidence": 0.1,
                 "brief_reason": "LLM解析失败"
             }

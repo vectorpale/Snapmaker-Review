@@ -54,17 +54,17 @@ CHART_COLORS = [
 PRIMARY_CAT_COLORS = {
     "问题/求助": MPL_ORANGE,
     "打印结果展示/晒作品": MPL_LIGHT_BLUE,
-    "正面评价": MPL_GREEN,
-    "负面评价": MPL_RED,
-    "无意义": MPL_GRAY,
+    "正面反馈": MPL_GREEN,
+    "负面反馈": MPL_RED,
+    "其他内容": MPL_GRAY,
 }
 
 PRIMARY_CAT_EN = {
     "问题/求助": "Questions / Help",
     "打印结果展示/晒作品": "Print Showcase",
-    "正面评价": "Positive Reviews",
-    "负面评价": "Negative Reviews",
-    "无意义": "Irrelevant",
+    "正面反馈": "Positive Feedback",
+    "负面反馈": "Negative Feedback",
+    "其他内容": "Other Content",
 }
 
 SENTIMENT_COLORS = {
@@ -575,20 +575,20 @@ class ReportGenerator:
         return page_num
 
     def _build_positive_analysis(self, page_num: int) -> int:
-        """第三章：正面评价分析。"""
+        """第三章：正面反馈分析。"""
         subcats = self.summary.get("positive_subcategories", {})
         quotes = self.summary.get("positive_quotes", [])
         return self._build_subcategory_analysis(
-            "第三章：正面评价分析 (Positive Reviews Analysis)",
+            "第三章：正面反馈分析 (Positive Feedback Analysis)",
             subcats, quotes, MPL_GREEN, ACCENT_GREEN, page_num
         )
 
     def _build_negative_analysis(self, page_num: int) -> int:
-        """第四章：负面评价分析。"""
+        """第四章：负面反馈分析。"""
         subcats = self.summary.get("negative_subcategories", {})
         quotes = self.summary.get("negative_quotes", [])
         return self._build_subcategory_analysis(
-            "第四章：负面评价分析 (Negative Reviews Analysis)",
+            "第四章：负面反馈分析 (Negative Feedback Analysis)",
             subcats, quotes, MPL_RED, ACCENT_RED, page_num
         )
 
@@ -678,12 +678,12 @@ class ReportGenerator:
         self._add_title_bar(slide, "附录：分析方法说明 (Appendix: Methodology)", page_num)
 
         method_text = [
-            "主贴分类 (Primary Classification): 基于关键词规则 + LLM 增强（如启用）进行五分类",
-            "子分类 (Sub-classification): 使用 Qwen LLM 对正面评价、负面评价、问题分别深度分析",
+            "主贴分类 (Primary Classification): MECE 五分类——问题/求助、打印结果展示、正面反馈、负面反馈、其他内容",
+            "主贴分类方法: 基于关键词规则 + LLM 增强（如启用），每帖仅归入1个类别",
+            "正面/负面子分类 (Positive/Negative Sub-classification): 允许多标签（1-3个），总数可超过帖子数",
+            "问题/求助子分类 (Issue Sub-classification): MECE 单标签，每帖仅归入1个子类别",
             "情感分析 (Sentiment Analysis): 加权词典方法（强/中/弱三级），支持中英文",
-            "多标签分类 (Multi-label): 单个帖子可归入多个细粒度类别",
-            "用户原声 (User Voices): 按互动量排序，选取各子类别代表性帖子",
-            "评论纳入 (Comments): 帖子评论作为辅助上下文参与分类",
+            "用户原声 (User Voices): 按互动量排序，选取各子类别代表性帖子（英文原文）",
             "字体规范 (Fonts): 中文使用等线 (DengXian)，英文使用 Calibri",
         ]
         self._add_bullet_list(slide, Inches(0.5), Inches(1.3), Inches(12), Inches(5),
@@ -706,11 +706,11 @@ class ReportGenerator:
         self._build_primary_classification(page)
         page += 1
 
-        # 第三章：正面评价分析（图表页 + 用户原声页）
+        # 第三章：正面反馈分析（图表页 + 用户原声页）
         page = self._build_positive_analysis(page)
         page += 1
 
-        # 第四章：负面评价分析（图表页 + 用户原声页）
+        # 第四章：负面反馈分析（图表页 + 用户原声页）
         page = self._build_negative_analysis(page)
         page += 1
 
