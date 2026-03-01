@@ -513,11 +513,13 @@ def main():
     for i, video in enumerate(top_videos):
         vid = video["video_id"]
 
-        # 断点续跑：跳过已分析的
+        # 断点续跑：跳过已分析的（字幕 success/skipped/failed 均视为已完成）
         existing = llm_results.get(vid, {})
-        if (existing.get("transcript", {}).get("status") == "success"
-                and existing.get("comments", {}).get("status") in (
-                    "success", "no_comments")):
+        t_done = existing.get("transcript", {}).get("status") in (
+            "success", "skipped", "failed")
+        c_done = existing.get("comments", {}).get("status") in (
+            "success", "no_comments", "failed")
+        if t_done and c_done:
             logger.info(
                 f"[{i+1}/{len(top_videos)}] 跳过已分析: "
                 f"{video['channel'][:20]} - {video['title'][:40]}"
