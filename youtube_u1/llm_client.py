@@ -63,8 +63,9 @@ def preflight_check_llm(client):
 
 def _call_llm(client, prompt, max_tokens=None, model=None):
     """
-    调用 LLM，带指数退避重试。
+    调用 LLM（流式），带指数退避重试。
 
+    使用流式模式避免长时间生成导致的 HTTP 超时。
     返回: str (生成文本) 或 None (失败)
     """
     if max_tokens is None:
@@ -75,13 +76,20 @@ def _call_llm(client, prompt, max_tokens=None, model=None):
     last_error = None
     for attempt in range(LLM_MAX_RETRIES + 1):
         try:
-            response = client.chat.completions.create(
+            stream = client.chat.completions.create(
                 model=model,
                 max_tokens=max_tokens,
                 temperature=LLM_TEMPERATURE,
                 messages=[{"role": "user", "content": prompt}],
+                stream=True,
             )
-            result = response.choices[0].message.content
+            chunks = []
+            for chunk in stream:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    chunks.append(chunk.choices[0].delta.content)
+            result = "".join(chunks)
+            if not result:
+                raise ValueError("LLM 流式返回空内容")
             time.sleep(LLM_RATE_LIMIT_DELAY)
             return result
         except Exception as e:
@@ -264,11 +272,11 @@ def generate_overall_with_llm(client, llm_results, videos):
     )
 
     logger.info(
-        f"调用 LLM ({LLM_MODEL_FAST}) 生成综合报告 "
+        f"调用 LLM ({LLM_MODEL_DEEP}) 生成综合报告 "
         f"(prompt: {len(prompt):,} chars)..."
     )
 
-    result = _call_llm(client, prompt, max_tokens=16384, model=LLM_MODEL_FAST)
+    result = _call_llm(client, prompt, max_tokens=16384, model=LLM_MODEL_DEEP)
     if result:
         return {"status": "success", "analysis_text": result, "error": None}
     return {

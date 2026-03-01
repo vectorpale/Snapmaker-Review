@@ -607,8 +607,13 @@ def main():
     # ===== Step 9: 生成总体报告（LLM 综合分析） =====
     logger.info("\nStep 9: 生成总体报告（LLM 综合分析）")
 
-    overall_llm = generate_overall_with_llm(llm, llm_results, top_videos)
-    save_checkpoint("overall_llm_analysis", overall_llm)
+    cached_overall = load_checkpoint("overall_llm_analysis")
+    if cached_overall and cached_overall.get("status") == "success":
+        overall_llm = cached_overall
+        logger.info("从检查点加载综合分析结果（跳过 LLM 调用）")
+    else:
+        overall_llm = generate_overall_with_llm(llm, llm_results, top_videos)
+        save_checkpoint("overall_llm_analysis", overall_llm)
     logger.info(f"LLM 综合分析: {overall_llm['status']}")
 
     report_text = generate_overall_report(
