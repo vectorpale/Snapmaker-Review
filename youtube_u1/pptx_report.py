@@ -16,6 +16,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import pandas as pd
+from lxml import etree
 from pptx import Presentation
 from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
@@ -74,6 +75,32 @@ TOPIC_DISPLAY = {
     "open_source": "开源",
     "quality_control": "品控",
 }
+
+
+# --- 字体设置 ---
+_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+FONT_LATIN = "Calibri"
+FONT_EA = "等线"
+
+
+def _set_paragraph_font(p, latin=None, ea=None):
+    """设置段落中所有 run 的中英文字体。"""
+    latin = latin or FONT_LATIN
+    ea = ea or FONT_EA
+    for r_elem in p._p.findall(f"{{{_NS}}}r"):
+        rPr = r_elem.find(f"{{{_NS}}}rPr")
+        if rPr is None:
+            rPr = etree.SubElement(r_elem, f"{{{_NS}}}rPr")
+        # Latin font (Calibri)
+        latin_elem = rPr.find(f"{{{_NS}}}latin")
+        if latin_elem is None:
+            latin_elem = etree.SubElement(rPr, f"{{{_NS}}}latin")
+        latin_elem.set("typeface", latin)
+        # East Asian font (等线)
+        ea_elem = rPr.find(f"{{{_NS}}}ea")
+        if ea_elem is None:
+            ea_elem = etree.SubElement(rPr, f"{{{_NS}}}ea")
+        ea_elem.set("typeface", ea)
 
 
 # ============================================================
@@ -309,6 +336,114 @@ def _chart_view_count_bar(videos):
     return fig
 
 
+def _chart_exec_summary_stats(text):
+    """从执行摘要提取 X/Y 统计，生成水平条形图。"""
+    if not text:
+        return None
+    # 匹配 "26/30 (86.7%)" 及其后面的上下文标签
+    pattern = r'(\d+)/(\d+)\s*\([\d.]+%\)\s*[的]?([^\n,，。]{2,30})'
+    matches = re.findall(pattern, text)
+    if len(matches) < 2:
+        return None
+
+    labels = []
+    values = []
+    totals = []
+    for num, denom, context in matches:
+        label = context.strip().rstrip("。，,.")
+        if len(label) > 20:
+            label = label[:20] + "…"
+        labels.append(label)
+        values.append(int(num))
+        totals.append(int(denom))
+
+    if not labels:
+        return None
+
+    fig, ax = plt.subplots(figsize=(9, max(3, len(labels) * 0.5)))
+    total = totals[0] if totals else 30
+    pcts = [v / total * 100 for v in values]
+    colors = []
+    for v, t in zip(values, totals):
+        ratio = v / t if t else 0
+        if ratio >= 0.6:
+            colors.append(CHART_COLORS["positive"])
+        elif ratio >= 0.3:
+            colors.append(CHART_COLORS["primary"])
+        else:
+            colors.append(CHART_COLORS["mixed"])
+
+    bars = ax.barh(labels, pcts, color=colors, height=0.5,
+                   edgecolor="white", linewidth=0.5)
+    ax.set_xlim(0, 105)
+    ax.set_xlabel("视频占比 (%)", fontsize=11)
+    ax.set_title("核心发现一览", fontsize=14, fontweight="bold")
+    ax.invert_yaxis()
+
+    for bar, val, total_val in zip(bars, values, totals):
+        ax.text(bar.get_width() + 1.5, bar.get_y() + bar.get_height() / 2,
+                f"{val}/{total_val}", va="center", fontsize=10, color="#555",
+                fontweight="bold")
+
+    _apply_thinkcell_style(ax)
+    fig.tight_layout()
+    return fig
+
+
+def _build_video_opinion_table(top_videos, llm_results):
+    """构建各频道对 U1 评价的结构化表格数据。"""
+    positive_kw = ["推荐", "值得", "优秀", "出色", "recommend", "impressed",
+                   "worth", "excellent", "great"]
+    negative_kw = ["不推荐", "失望", "不值", "问题多", "disappoint",
+                   "not recommend", "avoid"]
+
+    rows = []
+    for v in top_videos:
+        vid = v["video_id"]
+        lr = llm_results.get(vid, {})
+        ta_text = lr.get("transcript", {}).get("analysis_text", "")
+        if not ta_text:
+            continue
+
+        channel = v["channel"][:18]
+
+        # 提取视频类型
+        overview = _extract_section(ta_text, [
+            r"视频概述", r"U1 相关度", r"Overview",
+        ])
+        video_type = "专题评测"
+        if overview:
+            for kw in ["多产品", "对比", "盘点", "年度", "综合"]:
+                if kw in overview:
+                    video_type = "多产品对比"
+                    break
+
+        # 判断态度
+        snippet = ta_text[:600].lower()
+        has_pos = any(kw in snippet for kw in positive_kw)
+        has_neg = any(kw in snippet for kw in negative_kw)
+        if has_pos and not has_neg:
+            stance = "推荐"
+        elif has_neg and not has_pos:
+            stance = "不推荐"
+        else:
+            stance = "有保留"
+
+        # 提取核心理由（取前 80 字）
+        conclusion = _extract_section(ta_text, [
+            r"核心结论", r"Core Conclusion", r"总体评价",
+        ])
+        reason = ""
+        if conclusion:
+            reason = conclusion[:80].replace("\n", " ").strip()
+            if len(conclusion) > 80:
+                reason += "…"
+
+        rows.append([channel, video_type, stance, reason])
+
+    return {"headers": ["频道", "视频类型", "推荐态度", "核心理由"], "rows": rows}
+
+
 # ============================================================
 # Markdown table parser
 # ============================================================
@@ -435,6 +570,7 @@ def _add_title_slide(prs, title, subtitle=""):
     p.font.bold = True
     p.font.color.rgb = COLOR_WHITE
     p.alignment = PP_ALIGN.CENTER
+    _set_paragraph_font(p)
 
     txBox = slide.shapes.add_textbox(Inches(1), Inches(3), Inches(8), Inches(1))
     tf = txBox.text_frame
@@ -443,6 +579,7 @@ def _add_title_slide(prs, title, subtitle=""):
     p.font.size = Pt(24)
     p.font.color.rgb = COLOR_WHITE
     p.alignment = PP_ALIGN.CENTER
+    _set_paragraph_font(p)
 
     if subtitle:
         txBox = slide.shapes.add_textbox(Inches(1), Inches(4.2), Inches(8), Inches(1))
@@ -452,6 +589,7 @@ def _add_title_slide(prs, title, subtitle=""):
         p.font.size = Pt(14)
         p.font.color.rgb = RGBColor(0xCC, 0xDD, 0xEE)
         p.alignment = PP_ALIGN.CENTER
+        _set_paragraph_font(p)
 
     return slide
 
@@ -472,6 +610,7 @@ def _add_section_slide(prs, title):
     p.font.bold = True
     p.font.color.rgb = COLOR_WHITE
     p.alignment = PP_ALIGN.CENTER
+    _set_paragraph_font(p)
     return slide
 
 
@@ -486,6 +625,7 @@ def _add_metrics_slide(prs, title, metrics):
     p.font.size = Pt(20)
     p.font.bold = True
     p.font.color.rgb = COLOR_PRIMARY
+    _set_paragraph_font(p)
 
     n = len(metrics)
     card_width = 8.5 / n
@@ -510,12 +650,14 @@ def _add_metrics_slide(prs, title, metrics):
         p.font.color.rgb = COLOR_PRIMARY
         p.alignment = PP_ALIGN.CENTER
         p.space_after = Pt(4)
+        _set_paragraph_font(p)
 
         p2 = tf.add_paragraph()
         p2.text = label
         p2.font.size = Pt(12)
         p2.font.color.rgb = COLOR_NEUTRAL
         p2.alignment = PP_ALIGN.CENTER
+        _set_paragraph_font(p2)
 
     return slide
 
@@ -531,6 +673,7 @@ def _add_chart_slide(prs, title, fig, subtitle=""):
     p.font.size = Pt(20)
     p.font.bold = True
     p.font.color.rgb = COLOR_PRIMARY
+    _set_paragraph_font(p)
 
     line_shape = slide.shapes.add_shape(
         MSO_SHAPE.RECTANGLE, Inches(0.5), Inches(0.95),
@@ -548,10 +691,23 @@ def _add_chart_slide(prs, title, fig, subtitle=""):
         p.text = subtitle
         p.font.size = Pt(12)
         p.font.color.rgb = COLOR_NEUTRAL
+        _set_paragraph_font(p)
         chart_top = Inches(1.5)
 
+    # 按 fig 原始尺寸计算缩放，确保不超出幻灯片边界
+    fig_w, fig_h = fig.get_size_inches()
     image_stream = _fig_to_image_stream(fig)
-    slide.shapes.add_picture(image_stream, Inches(0.75), chart_top, width=Inches(8.5))
+
+    max_w, max_h = 8.5, 5.5
+    if subtitle:
+        max_h = 5.0
+    scale = min(max_w / fig_w, max_h / fig_h, 1.0)
+    target_w = fig_w * scale
+    target_h = fig_h * scale
+    left = (10 - target_w) / 2  # 水平居中
+
+    slide.shapes.add_picture(image_stream, Inches(left), chart_top,
+                             width=Inches(target_w), height=Inches(target_h))
     return slide
 
 
@@ -579,6 +735,7 @@ def _add_native_table_slide(prs, title, table_data):
         p.font.size = Pt(20)
         p.font.bold = True
         p.font.color.rgb = COLOR_PRIMARY
+        _set_paragraph_font(p)
 
         n_data = len(page_rows)
         row_height = min(0.5, 6.0 / (n_data + 1))
@@ -603,12 +760,12 @@ def _add_native_table_slide(prs, title, table_data):
                 para.font.size = Pt(12)
                 para.font.bold = True
                 para.font.color.rgb = COLOR_WHITE
+                _set_paragraph_font(para)
 
         # 数据行
         for i, row in enumerate(page_rows):
             for j, val in enumerate(row):
                 cell = table.cell(i + 1, j)
-                # 清理 markdown 加粗标记
                 clean_val = str(val).replace("**", "")
                 cell.text = clean_val
                 if i % 2 == 0:
@@ -617,11 +774,12 @@ def _add_native_table_slide(prs, title, table_data):
                 for para in cell.text_frame.paragraphs:
                     para.font.size = Pt(12)
                     para.font.color.rgb = COLOR_DARK
+                    _set_paragraph_font(para)
 
     return slides
 
 
-def _render_text_slides(prs, title, text, max_chars=1200):
+def _render_text_slides(prs, title, text, max_chars=900):
     """渲染纯文本内容幻灯片（字体 ≥ 12pt）。"""
     slides = []
     text = text.strip()
@@ -640,6 +798,7 @@ def _render_text_slides(prs, title, text, max_chars=1200):
         p.font.size = Pt(20)
         p.font.bold = True
         p.font.color.rgb = COLOR_PRIMARY
+        _set_paragraph_font(p)
 
         line_shape = slide.shapes.add_shape(
             MSO_SHAPE.RECTANGLE, Inches(0.5), Inches(0.95),
@@ -693,6 +852,7 @@ def _render_text_slides(prs, title, text, max_chars=1200):
                 p.text = line_text
                 p.font.size = Pt(12)
                 p.font.color.rgb = COLOR_DARK
+            _set_paragraph_font(p)
 
         if tf.paragraphs[0].text == "":
             tf.paragraphs[0]._p.getparent().remove(tf.paragraphs[0]._p)
@@ -700,7 +860,7 @@ def _render_text_slides(prs, title, text, max_chars=1200):
     return slides
 
 
-def _add_content_slide(prs, title, body_text, max_chars=1200):
+def _add_content_slide(prs, title, body_text, max_chars=900):
     """添加内容幻灯片，自动检测 markdown 表格并转为原生表格。"""
     slides = []
     segments = _split_text_and_tables(body_text)
@@ -734,6 +894,7 @@ def _add_video_table_slide(prs, videos, llm_results):
         p.font.size = Pt(16)
         p.font.bold = True
         p.font.color.rgb = COLOR_PRIMARY
+        _set_paragraph_font(p)
 
         rows = len(page_videos) + 1
         cols = 5
@@ -759,6 +920,7 @@ def _add_video_table_slide(prs, videos, llm_results):
                 para.font.size = Pt(12)
                 para.font.bold = True
                 para.font.color.rgb = COLOR_WHITE
+                _set_paragraph_font(para)
 
         for i, v in enumerate(page_videos):
             idx = page_start + i + 1
@@ -784,6 +946,7 @@ def _add_video_table_slide(prs, videos, llm_results):
                 for para in cell.text_frame.paragraphs:
                     para.font.size = Pt(12)
                     para.font.color.rgb = COLOR_DARK
+                    _set_paragraph_font(para)
 
 
 def _extract_section(text, header_patterns):
@@ -792,7 +955,7 @@ def _extract_section(text, header_patterns):
         return ""
     for pattern in header_patterns:
         regex = (
-            r"##\s*(?:\d+[\.\s]*)?" + pattern +
+            r"##\s*(?:\d+[\.\s]*)?[^\n]*?" + pattern +
             r"[^\n]*\n(.*?)(?=\n##\s|\Z)"
         )
         match = re.search(regex, text, re.DOTALL | re.IGNORECASE)
@@ -862,6 +1025,12 @@ def generate_pptx_report(
     ])
     if exec_summary:
         _add_content_slide(prs, "执行摘要", exec_summary)
+
+        # 执行摘要统计图表
+        fig = _chart_exec_summary_stats(exec_summary)
+        if fig:
+            _add_chart_slide(prs, "核心发现一览", fig,
+                             subtitle="基于评测视频的关键统计数据")
 
     # ================================================================
     # 第一部分：评测视频全景
@@ -944,52 +1113,13 @@ def generate_pptx_report(
             )
 
     # ================================================================
-    # 第四部分：综合测评视频中对 U1 的观点
+    # 第四部分：综合测评视频中对 U1 的观点（表格形式）
     # ================================================================
     _add_section_slide(prs, "第四部分：综合测评视频对 U1 的观点")
 
-    # 从各视频提取概述（区分专题评测 vs 综合测评）
-    comprehensive_views = []
-    for v in top_videos:
-        vid = v["video_id"]
-        ta_text = llm_results.get(vid, {}).get("transcript", {}).get("analysis_text", "")
-        if not ta_text:
-            continue
-        overview = _extract_section(ta_text, [
-            r"视频概述", r"U1 相关度", r"Overview",
-        ])
-        conclusion = _extract_section(ta_text, [
-            r"核心结论", r"Core Conclusion", r"总体评价",
-        ])
-        # 如果概述中提到"多产品对比"或"年度盘点"则归类为综合测评
-        is_comprehensive = False
-        if overview:
-            for kw in ["多产品", "对比", "盘点", "年度", "综合", "comparison",
-                       "roundup", "top", "best"]:
-                if kw in overview.lower():
-                    is_comprehensive = True
-                    break
-
-        body = f"### {v['channel']}\n"
-        body += f"视频: {v['title'][:50]}\n观看量: {v['view_count']:,}\n\n"
-        if overview:
-            body += f"{overview[:300]}\n\n"
-        if conclusion:
-            body += f"**核心结论**: {conclusion[:400]}\n"
-
-        if is_comprehensive:
-            comprehensive_views.append(body)
-        elif conclusion:
-            comprehensive_views.append(body)
-
-    if comprehensive_views:
-        for i in range(0, len(comprehensive_views), 2):
-            batch = "\n\n---\n\n".join(comprehensive_views[i:i + 2])
-            _add_content_slide(
-                prs,
-                f"各频道对 U1 的评价（{i // 2 + 1}）",
-                batch,
-            )
+    opinion_table = _build_video_opinion_table(top_videos, llm_results)
+    if opinion_table["rows"]:
+        _add_native_table_slide(prs, "各频道对 U1 的评价", opinion_table)
 
     # ================================================================
     # 第五部分：与其他竞品对比
