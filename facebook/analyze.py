@@ -12,6 +12,9 @@ Snapmaker U1 Facebook 用户反馈分析工具
     # 禁用 LLM，仅用关键词规则分类
     python analyze.py <input.json> --no-llm
 
+    # 断点续跑（上次运行中断后，跳过已完成的阶段）
+    python analyze.py <input.json> --resume
+
 分类体系（双维度）:
     维度一 — 内容类型 (MECE): 问题/求助、评价/反馈、产品展示、其他
     维度二 — 情感倾向: 正面、负面、中性
@@ -20,15 +23,22 @@ Snapmaker U1 Facebook 用户反馈分析工具
       - 情感=负面 的帖子 → 负面反馈子分类（多标签）
       - 内容类型=问题/求助 的帖子 → 问题子分类（MECE 单标签）
     生成含饼图/条形图的 PPTX 报告（简体中文）
+
+断点续跑:
+    每个分析阶段完成后自动保存检查点到 output/checkpoint.json。
+    使用 --resume 可跳过已完成的阶段，节省 API 流量和时间。
+    检查点会在分析全部成功完成后自动清理。
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
 import sys
 from collections import Counter, defaultdict
-from typing import Dict, List, Any
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
 from classifier import FeedbackClassifier, CATEGORY_NAMES, L1_NAMES, get_l1_from_code, get_top_from_code
 from sentiment import SentimentAnalyzer
@@ -90,6 +100,87 @@ _KEYWORD_CONTENT_TYPE_MAP = {
         ],
     },
 }
+
+
+# ── 检查点管理（断点续跑） ─────────────────────────────────────
+
+_CHECKPOINT_FILE = "checkpoint.json"
+_CHECKPOINT_VERSION = 1
+
+
+def _hash_file(filepath: str) -> str:
+    """计算文件 SHA-256 哈希值，用于检测输入文件变更。"""
+    h = hashlib.sha256()
+    with open(filepath, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _save_checkpoint(path: str, *, input_file: str, input_hash: str,
+                     completed_stage: int, analyzed_posts: list = None,
+                     llm_subcategories: dict = None):
+    """原子性地保存流水线检查点。
+
+    Stages:
+        2 — 阶段 1+2 已完成（细粒度分类 + 双维度分类）
+        3 — 阶段 3 已完成（子分类深度分析）
+    """
+    data = {
+        "version": _CHECKPOINT_VERSION,
+        "input_file": os.path.abspath(input_file),
+        "input_hash": input_hash,
+        "completed_stage": completed_stage,
+        "timestamp": datetime.now().isoformat(),
+    }
+    if analyzed_posts is not None:
+        data["analyzed_posts"] = analyzed_posts
+    if llm_subcategories is not None:
+        data["llm_subcategories"] = llm_subcategories
+
+    def _default(obj):
+        if isinstance(obj, set):
+            return sorted(list(obj))
+        if isinstance(obj, Counter):
+            return dict(obj)
+        raise TypeError(f"Not JSON serializable: {type(obj).__name__}")
+
+    # 写入临时文件再原子重命名，防止中途断电导致文件损坏
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2, default=_default)
+    os.replace(tmp, path)
+
+    size_kb = os.path.getsize(path) / 1024
+    print(f"  检查点已保存 (阶段 {completed_stage}, {size_kb:.0f}KB)")
+
+
+def _load_checkpoint(path: str, input_file: str) -> Optional[dict]:
+    """加载并验证检查点。文件不存在或无效时返回 None。"""
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        print(f"  检查点文件损坏 ({e})，将重新开始。")
+        return None
+
+    if data.get("version") != _CHECKPOINT_VERSION:
+        print(f"  检查点版本不匹配 (期望 v{_CHECKPOINT_VERSION}，"
+              f"实际 v{data.get('version')})，将重新开始。")
+        return None
+
+    current_hash = _hash_file(input_file)
+    if data.get("input_hash") != current_hash:
+        print("  输入文件已变更（哈希不匹配），检查点无效。")
+        return None
+
+    stage = data.get("completed_stage", 0)
+    ts = data.get("timestamp", "")
+    n = len(data.get("analyzed_posts", []))
+    print(f"  有效检查点: 阶段 {stage} 已完成, {n} 个帖子, 保存于 {ts}")
+    return data
 
 
 def load_data(filepath: str) -> dict:
@@ -221,9 +312,20 @@ def analyze_posts(posts: list, classifier: FeedbackClassifier,
     return results
 
 
-def analyze_subcategories_with_llm(analyzed_posts: list, llm_client) -> dict:
-    """使用 LLM 进行子分类：按情感分正面/负面，按内容类型分问题。"""
+def analyze_subcategories_with_llm(analyzed_posts: list, llm_client,
+                                    existing_results: dict = None,
+                                    checkpoint_callback=None) -> dict:
+    """使用 LLM 进行子分类，支持断点续跑。
+
+    Args:
+        existing_results: 已有的子分类结果（来自检查点），跳过已完成的子任务。
+        checkpoint_callback: 每完成一个子任务后调用 callback(sub_results) 保存检查点。
+    """
     sub_results = {"positive": [], "negative": [], "issue": []}
+    if existing_results:
+        for key in ("positive", "negative", "issue"):
+            if existing_results.get(key):
+                sub_results[key] = existing_results[key]
 
     # 按情感分组（正面/负面）
     positive_posts = [p for p in analyzed_posts if p.get("sentiment_label") == "正面"]
@@ -231,26 +333,26 @@ def analyze_subcategories_with_llm(analyzed_posts: list, llm_client) -> dict:
     # 按内容类型分组（问题/求助）
     issue_posts = [p for p in analyzed_posts if p.get("content_type") == "问题/求助"]
 
-    if positive_posts:
-        print(f"\n  正面反馈子分类 ({len(positive_posts)} 个帖子)...")
-        try:
-            sub_results["positive"] = llm_client.analyze_subcategories(positive_posts, "positive")
-        except Exception as e:
-            print(f"    失败: {e}")
+    tasks = [
+        ("positive", positive_posts, "正面反馈"),
+        ("negative", negative_posts, "负面反馈"),
+        ("issue", issue_posts, "问题/求助"),
+    ]
 
-    if negative_posts:
-        print(f"\n  负面反馈子分类 ({len(negative_posts)} 个帖子)...")
+    for key, posts_subset, label in tasks:
+        if sub_results[key]:
+            print(f"\n  {label}子分类: 从检查点加载 ({len(sub_results[key])} 条)")
+            continue
+        if not posts_subset:
+            continue
+        print(f"\n  {label}子分类 ({len(posts_subset)} 个帖子)...")
         try:
-            sub_results["negative"] = llm_client.analyze_subcategories(negative_posts, "negative")
+            sub_results[key] = llm_client.analyze_subcategories(posts_subset, key)
         except Exception as e:
             print(f"    失败: {e}")
-
-    if issue_posts:
-        print(f"\n  问题/求助子分类 ({len(issue_posts)} 个帖子)...")
-        try:
-            sub_results["issue"] = llm_client.analyze_subcategories(issue_posts, "issue")
-        except Exception as e:
-            print(f"    失败: {e}")
+        # 每完成一个子任务就保存检查点，防止后续子任务失败丢失进度
+        if checkpoint_callback:
+            checkpoint_callback(sub_results)
 
     return sub_results
 
@@ -526,6 +628,8 @@ def main():
                         help="禁用 LLM，仅使用关键词规则分类")
     parser.add_argument("--api-key", default=None,
                         help="Qwen API Key（也可通过 .env 文件配置）")
+    parser.add_argument("--resume", action="store_true",
+                        help="从检查点断点续跑，跳过已完成的阶段（节省API流量和时间）")
 
     args = parser.parse_args()
 
@@ -546,6 +650,9 @@ def main():
         output_dir = os.path.join(os.path.dirname(__file__), "output")
     os.makedirs(output_dir, exist_ok=True)
 
+    # 检查点路径
+    checkpoint_path = os.path.join(output_dir, _CHECKPOINT_FILE)
+
     # 加载数据
     raw_data = load_data(args.input_file)
     posts = raw_data.get("posts", [])
@@ -553,6 +660,20 @@ def main():
     if not posts:
         print("错误: 输入文件中未找到帖子数据。")
         sys.exit(1)
+
+    # 计算输入文件哈希（用于检查点验证）
+    input_hash = _hash_file(args.input_file)
+
+    # 尝试加载检查点
+    ckpt = None
+    resumed_stage = 0
+    if args.resume:
+        print("\n检查断点状态...")
+        ckpt = _load_checkpoint(checkpoint_path, args.input_file)
+        if ckpt:
+            resumed_stage = ckpt.get("completed_stage", 0)
+        else:
+            print("  未找到有效检查点，将从头开始。")
 
     # 初始化引擎
     print("\n初始化分类引擎...")
@@ -574,15 +695,46 @@ def main():
     else:
         print("LLM 已禁用（--no-llm），使用关键词规则分类。")
 
-    # 分析帖子
-    print(f"\n开始分析 {len(posts)} 个帖子...")
-    analyzed_posts = analyze_posts(posts, classifier, sentiment_analyzer, llm_client)
+    # ── 阶段 1+2：分类与情感分析 + 双维度分类 ──
+    if resumed_stage >= 2 and ckpt and ckpt.get("analyzed_posts"):
+        analyzed_posts = ckpt["analyzed_posts"]
+        print(f"\n跳过阶段 1-2: 从检查点加载 {len(analyzed_posts)} 个帖子的分析结果")
+    else:
+        print(f"\n开始分析 {len(posts)} 个帖子...")
+        analyzed_posts = analyze_posts(posts, classifier, sentiment_analyzer, llm_client)
+        # 阶段 1+2 完成，立即保存检查点
+        _save_checkpoint(checkpoint_path, input_file=args.input_file,
+                         input_hash=input_hash, completed_stage=2,
+                         analyzed_posts=analyzed_posts)
 
-    # LLM 子分类
+    # ── 阶段 3：子分类深度分析 ──
     llm_subcategories = None
     if llm_client:
-        print("\n--- 第三阶段：子分类深度分析 ---")
-        llm_subcategories = analyze_subcategories_with_llm(analyzed_posts, llm_client)
+        existing_sub = ckpt.get("llm_subcategories") if ckpt else None
+
+        if resumed_stage >= 3:
+            print("\n跳过阶段 3: 从检查点加载子分类结果")
+            llm_subcategories = existing_sub
+        else:
+            print("\n--- 第三阶段：子分类深度分析 ---")
+
+            def _on_subtask_done(sub_results):
+                """每完成一个子任务（正面/负面/问题）就保存检查点。"""
+                _save_checkpoint(checkpoint_path, input_file=args.input_file,
+                                 input_hash=input_hash, completed_stage=2,
+                                 analyzed_posts=analyzed_posts,
+                                 llm_subcategories=sub_results)
+
+            llm_subcategories = analyze_subcategories_with_llm(
+                analyzed_posts, llm_client,
+                existing_results=existing_sub,
+                checkpoint_callback=_on_subtask_done,
+            )
+            # 阶段 3 全部完成，更新检查点
+            _save_checkpoint(checkpoint_path, input_file=args.input_file,
+                             input_hash=input_hash, completed_stage=3,
+                             analyzed_posts=analyzed_posts,
+                             llm_subcategories=llm_subcategories)
 
     # 构建统计摘要
     print("\n构建统计摘要...")
@@ -613,6 +765,11 @@ def main():
     report_gen = ReportGenerator(analysis_data)
     pptx_path = os.path.join(output_dir, "report.pptx")
     report_gen.generate(pptx_path)
+
+    # 分析全部成功完成，清理检查点
+    for tmp_f in (checkpoint_path, checkpoint_path + ".tmp"):
+        if os.path.exists(tmp_f):
+            os.remove(tmp_f)
 
     print(f"\n{'='*60}")
     print("分析完成！")
