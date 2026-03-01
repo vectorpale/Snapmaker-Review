@@ -1,0 +1,128 @@
+{
+  "P1": {
+    "name": "Good print quality",
+    "name_zh": "打印质量好",
+    "keywords_en": [
+      "great quality", "excellent quality", "amazing quality", "print quality",
+      "beautiful print", "perfect print", "smooth print", "clean print",
+      "impressive quality", "high quality", "quality is great", "quality is amazing",
+      "best quality", "incredible quality", "fantastic quality", "stunning quality",
+      "flawless print", "crisp print", "sharp details"
+    ],
+    "keywords_zh": [
+      "質量好", "品質好", "打印效果好", "印刷品質"
+    ],
+    "patterns": [
+      "(?:print|quality).*(?:great|excellent|amazing|beautiful|perfect|impressive|fantastic|stunning|incredible|flawless)",
+      "(?:great|excellent|amazing|beautiful|perfect|impressive|fantastic|stunning).*(?:print|quality)"
+    ]
+  },
+  "P2": {
+    "name": "Multi-color printing impressive",
+    "name_zh": "多色打印效果惊艳",
+    "keywords_en": [
+      "multi color", "multi-color", "multicolor", "multi colour",
+      "color print", "colour print", "color change", "beautiful colors",
+      "color quality", "vibrant color", "nice colors", "multi material print",
+      "4 color", "dual color", "amazing color", "color accuracy"
+    ],
+    "keywords_zh": [
+      "多色", "多色打印", "顏色好", "多彩"
+    ],
+    "patterns": [
+      "(?:multi|dual|4|four|three|3)\\s*-?\\s*(?:color|colour|material).*(?:great|amazing|beautiful|perfect|impressive|love)",
+      "(?:color|colour).*(?:great|amazing|beautiful|vibrant|nice|stunning|accurate|accurate)"
+    ]
+  },
+  "P3": {
+    "name": "Fast tool change / less waste",
+    "name_zh": "换头速度快/浪费少",
+    "keywords_en": [
+      "fast tool change", "quick tool change", "fast swap", "tool change speed",
+      "less waste", "minimal waste", "low waste", "waste less than",
+      "no purge tower", "toolchanger advantage", "fast head swap"
+    ],
+    "keywords_zh": [
+      "換頭快", "浪費少", "工具更換快", "換色快"
+    ],
+    "patterns": [
+      "(?:fast|quick|rapid|speed).*(?:tool change|head swap|tool swap|swap)",
+      "(?:less|minimal|low|no|little)\\s*waste",
+      "(?:waste|purge).*(?:less|minimal|low|little|better)"
+    ]
+  },
+  "P4": {
+    "name": "Good value for money",
+    "name_zh": "性价比高",
+    "keywords_en": [
+      "value for money", "good value", "great value", "worth every penny",
+      "best deal", "good price", "reasonable price", "bang for buck",
+      "competitive price", "worth the money", "worth the price",
+      "good deal", "price point"
+    ],
+    "keywords_zh": [
+      "性價比", "值得", "划算", "便宜"
+    ],
+    "patterns": [
+      "(?:great|good|best|excellent)\\s*(?:value|deal|price|bang for buck)",
+      "worth.*(?:money|price|penny|every|it)",
+      "(?:competitive|reasonable|fair)\\s*price"
+    ]
+  },
+  "P5": {
+    "name": "Easy setup / works out of box",
+    "name_zh": "设置简单/开箱即用",
+    "keywords_en": [
+      "easy setup", "easy to setup", "easy to set up", "simple setup",
+      "out of box", "out of the box", "plug and play", "straightforward",
+      "easy assembly", "quick setup", "easy to use", "user friendly",
+      "beginner friendly", "intuitive"
+    ],
+    "keywords_zh": [
+      "簡單設置", "開箱即用", "容易使用", "易用"
+    ],
+    "patterns": [
+      "(?:easy|simple|quick|straightforward|intuitive).*(?:setup|set up|assembly|use|install)",
+      "out\\s*of\\s*(?:the\\s*)?box",
+      "(?:plug|turn)\\s*(?:and|&)\\s*(?:play|print)",
+      "(?:beginner|user)\\s*friendly"
+    ]
+  },
+  "P6": {
+    "name": "Show & tell (showcase prints)",
+    "name_zh": "展示打印成品",
+    "keywords_en": [
+      "check this out", "just printed", "first print", "latest print",
+      "look at this", "show off", "proud of", "turned out great",
+      "came out great", "look what", "my print", "finally printed",
+      "test print", "benchmark", "benchy", "print showcase",
+      "sharing my", "here's my"
+    ],
+    "keywords_zh": [
+      "看看這個", "剛印的", "第一次打印", "成品展示"
+    ],
+    "patterns": [
+      "(?:check|look).*(?:this|what|my).*(?:out|print)",
+      "(?:just|finally|first|test)\\s*print",
+      "(?:came|turned|worked)\\s*out\\s*(?:great|good|nice|amazing|perfect|well)",
+      "(?:proud|happy|thrilled|excited).*(?:print|result|output)"
+    ]
+  },
+  "P7": {
+    "name": "Community support / knowledge sharing",
+    "name_zh": "社区互助/分享经验",
+    "keywords_en": [
+      "thanks for sharing", "helpful", "great community", "love this group",
+      "thanks for help", "thank you", "great tip", "good advice",
+      "appreciate", "sharing knowledge", "community help"
+    ],
+    "keywords_zh": [
+      "感謝分享", "社區互助", "好建議", "謝謝"
+    ],
+    "patterns": [
+      "(?:thanks|thank|thx).*(?:shar|help|tip|advice|community)",
+      "(?:great|good|awesome|wonderful|best).*(?:community|group|tip|advice)",
+      "(?:helpful|appreciate|grateful)"
+    ]
+  }
+}

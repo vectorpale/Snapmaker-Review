@@ -1,0 +1,275 @@
+{
+  "S1": {
+    "name": "Snapmaker Orca (Slicer)",
+    "name_zh": "Snapmaker Orca (切片软件)",
+    "subcategories": {
+      "S1.1": {
+        "name": "Software crash",
+        "name_zh": "软件崩溃/闪退",
+        "keywords_en": [
+          "orca crash", "slicer crash", "software crash", "app crash",
+          "orca freeze", "orca hang", "orca not responding", "orca close",
+          "orca won't open", "snapmaker orca crash", "crash when opening",
+          "crash on import", "crash 3mf", "slicer freeze"
+        ],
+        "keywords_zh": [
+          "閃退", "崩潰", "卡死", "軟件崩潰", "切片器崩潰"
+        ],
+        "patterns": [
+          "(?:orca|slicer|software).*(?:crash|freeze|hang|not respond|close unexpect)",
+          "crash.*(?:orca|slicer|open|import|3mf)"
+        ]
+      },
+      "S1.2": {
+        "name": "Outdated version / missing features",
+        "name_zh": "版本过旧，缺少新功能",
+        "keywords_en": [
+          "outdated", "old version", "behind orca", "orca version",
+          "update orca", "latest orca", "missing feature", "not up to date",
+          "orca slicer newer", "feature missing", "orca fork", "based on old",
+          "upstream orca"
+        ],
+        "keywords_zh": [
+          "版本過舊", "缺少功能", "更新版本", "舊版本"
+        ],
+        "patterns": [
+          "(?:snapmaker\\s*)?orca.*(?:outdat|old|behind|version|update|missing)",
+          "(?:outdat|old|behind).*(?:orca|slicer)"
+        ]
+      },
+      "S1.3": {
+        "name": "Profile/preset issues",
+        "name_zh": "配置文件/预设问题",
+        "keywords_en": [
+          "profile issue", "preset issue", "wrong profile", "profile missing",
+          "default profile", "print profile", "material profile", "custom profile",
+          "profile settings", "slicer settings", "preset not working",
+          "profile error", "slicer profile"
+        ],
+        "keywords_zh": [
+          "配置文件", "預設問題", "參數設置", "配置檔"
+        ],
+        "patterns": [
+          "(?:print|material|slicer|custom|default)\\s*profile",
+          "profile.*(?:issue|problem|wrong|missing|error|not work)",
+          "preset.*(?:issue|problem|wrong|missing|error|not work)"
+        ]
+      },
+      "S1.4": {
+        "name": "Incompatible with Bambu Studio 3mf",
+        "name_zh": "不兼容 Bambu Studio 3mf 文件",
+        "keywords_en": [
+          "bambu 3mf", "bambu studio 3mf", "3mf incompatible", "import 3mf",
+          "3mf file", "can't open 3mf", "3mf error", "bambu file",
+          "3mf format", "3mf import"
+        ],
+        "keywords_zh": [
+          "3mf文件", "不兼容", "無法導入"
+        ],
+        "patterns": [
+          "(?:bambu|3mf).*(?:incompatib|not compat|can't open|error|import|fail)",
+          "(?:import|open).*3mf.*(?:fail|error|issue)"
+        ]
+      }
+    }
+  },
+  "S2": {
+    "name": "Firmware",
+    "name_zh": "固件",
+    "subcategories": {
+      "S2.1": {
+        "name": "Firmware update causes new issues",
+        "name_zh": "固件更新后出现新问题",
+        "keywords_en": [
+          "firmware update issue", "after update", "since update",
+          "update broke", "update caused", "firmware bug", "regression",
+          "worse after update", "new issue after", "broken after update",
+          "update problem", "firmware downgrade"
+        ],
+        "keywords_zh": [
+          "固件更新問題", "更新後", "更新導致", "固件bug"
+        ],
+        "patterns": [
+          "(?:firmware|fw).*(?:update|upgrade).*(?:issue|problem|broke|bug|caus)",
+          "(?:after|since).*(?:firmware|fw).*update",
+          "(?:update|upgrade).*(?:broke|caus|worse|regression)"
+        ]
+      },
+      "S2.2": {
+        "name": "Specific firmware version bugs",
+        "name_zh": "特定固件版本 bug",
+        "keywords_en": [
+          "fw 1.1", "firmware 1.1", "fw 1.0", "firmware 1.0",
+          "fw bug", "firmware version", "fw version",
+          "specific firmware", "firmware 1.2", "fw 1.2"
+        ],
+        "keywords_zh": [
+          "固件版本", "韌體版本", "固件bug"
+        ],
+        "patterns": [
+          "(?:fw|firmware)\\s*(?:v?\\d+\\.\\d+)",
+          "(?:fw|firmware)\\s*(?:version|bug)"
+        ]
+      },
+      "S2.3": {
+        "name": "Klipper configuration",
+        "name_zh": "Klipper 配置相关",
+        "keywords_en": [
+          "klipper", "klipper config", "klipper macro", "input shaper",
+          "pressure advance", "klipper settings", "klipper firmware",
+          "moonraker", "fluidd", "mainsail", "klippy"
+        ],
+        "keywords_zh": [
+          "Klipper", "配置", "輸入整形器", "壓力提前"
+        ],
+        "patterns": [
+          "klipper.*(?:config|macro|setting|firmware|issue|problem)",
+          "(?:input\\s*shaper|pressure\\s*advance)",
+          "(?:moonraker|fluidd|mainsail|klippy)"
+        ]
+      }
+    }
+  },
+  "S3": {
+    "name": "App / Remote Control",
+    "name_zh": "App / 远程控制",
+    "subcategories": {
+      "S3.1": {
+        "name": "Snapmaker App issues",
+        "name_zh": "Snapmaker App 问题",
+        "keywords_en": [
+          "snapmaker app", "mobile app", "phone app", "app issue",
+          "app not working", "app crash", "app error", "app bug",
+          "app connection", "app update"
+        ],
+        "keywords_zh": [
+          "App", "手機應用", "應用程式"
+        ],
+        "patterns": [
+          "(?:snapmaker|mobile|phone)\\s*app.*(?:issue|problem|crash|error|bug|not work)",
+          "app.*(?:connect|crash|error|bug|issue|not work|update)"
+        ]
+      },
+      "S3.2": {
+        "name": "Camera/timelapse not working",
+        "name_zh": "摄像头/延时摄影不工作",
+        "keywords_en": [
+          "camera not working", "camera issue", "timelapse", "time lapse",
+          "camera error", "camera offline", "webcam", "camera stream",
+          "video feed", "camera black", "camera view"
+        ],
+        "keywords_zh": [
+          "攝像頭", "延時攝影", "相機", "鏡頭"
+        ],
+        "patterns": [
+          "camera.*(?:not work|issue|error|offline|black|stream|view)",
+          "(?:time\\s*lapse|timelapse).*(?:issue|not work|error|fail)"
+        ]
+      },
+      "S3.3": {
+        "name": "AI detection issues",
+        "name_zh": "AI 检测问题",
+        "keywords_en": [
+          "spaghetti detection", "ai detection", "print detection",
+          "failure detection", "ai monitor", "false positive",
+          "false alarm", "ai trigger", "spaghetti alert"
+        ],
+        "keywords_zh": [
+          "AI檢測", "麵條偵測", "偵測問題", "誤報"
+        ],
+        "patterns": [
+          "(?:spaghetti|ai|failure|print)\\s*detect",
+          "(?:false|wrong)\\s*(?:positive|alarm|trigger|detect)",
+          "ai\\s*(?:monitor|detect|trigger|alert)"
+        ]
+      }
+    }
+  },
+  "S4": {
+    "name": "Feature Requests",
+    "name_zh": "缺失功能请求",
+    "subcategories": {
+      "S4.1": {
+        "name": "Request Snapmaker Cloud",
+        "name_zh": "请求 Snapmaker Cloud",
+        "keywords_en": [
+          "snapmaker cloud", "cloud print", "cloud service",
+          "remote print", "send from anywhere", "cloud slicer",
+          "cloud feature"
+        ],
+        "keywords_zh": [
+          "雲端", "雲打印", "遠程打印"
+        ],
+        "patterns": [
+          "(?:snapmaker|sm)\\s*cloud",
+          "cloud.*(?:print|service|feature|send)"
+        ]
+      },
+      "S4.2": {
+        "name": "Request third-party filament presets",
+        "name_zh": "请求第三方耗材自定义预设",
+        "keywords_en": [
+          "third party filament", "3rd party filament", "custom filament",
+          "filament preset", "filament profile", "add filament",
+          "other filament brand", "non-snapmaker filament"
+        ],
+        "keywords_zh": [
+          "第三方耗材", "自定義耗材", "耗材預設"
+        ],
+        "patterns": [
+          "(?:third|3rd)\\s*party.*filament",
+          "(?:custom|other|non-snapmaker)\\s*filament",
+          "filament.*(?:preset|profile|custom|add)"
+        ]
+      },
+      "S4.3": {
+        "name": "Request mixed nozzle diameter support",
+        "name_zh": "请求混合喷嘴直径支持",
+        "keywords_en": [
+          "mixed nozzle", "different nozzle size", "nozzle diameter",
+          "0.4 and 0.6", "0.2 nozzle", "nozzle mix", "multi nozzle size"
+        ],
+        "keywords_zh": [
+          "混合噴嘴", "不同噴嘴尺寸", "噴嘴直徑"
+        ],
+        "patterns": [
+          "(?:mixed|different|multi).*nozzle.*(?:size|diameter)",
+          "nozzle.*(?:mix|different|multi).*(?:size|diameter)"
+        ]
+      },
+      "S4.4": {
+        "name": "Request auto-refill",
+        "name_zh": "请求自动续料",
+        "keywords_en": [
+          "auto refill", "auto-refill", "automatic refill",
+          "continuous printing", "ams", "filament auto",
+          "spool join", "infinite spool"
+        ],
+        "keywords_zh": [
+          "自動續料", "自動補料", "連續打印"
+        ],
+        "patterns": [
+          "auto\\s*-?\\s*refill",
+          "(?:spool|filament).*(?:join|auto|infinite|continuous)"
+        ]
+      },
+      "S4.5": {
+        "name": "Other feature requests",
+        "name_zh": "其他功能请求",
+        "keywords_en": [
+          "feature request", "would be nice", "wish it had",
+          "should add", "please add", "need feature", "want feature",
+          "hoping for", "request feature"
+        ],
+        "keywords_zh": [
+          "功能請求", "希望有", "請增加"
+        ],
+        "patterns": [
+          "(?:feature|function).*(?:request|wish|want|need|add)",
+          "(?:would be|should be|could be).*(?:nice|great|good).*(?:if|to)",
+          "(?:please|plz|pls).*(?:add|implement|support)"
+        ]
+      }
+    }
+  }
+}

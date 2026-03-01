@@ -1,0 +1,246 @@
+{
+  "U1": {
+    "name": "Purchase / Shipping",
+    "name_zh": "购买/物流",
+    "subcategories": {
+      "U1.1": {
+        "name": "Shipping delay",
+        "name_zh": "发货延迟",
+        "keywords_en": [
+          "shipping delay", "delayed shipping", "not shipped", "still waiting",
+          "label created", "hasn't shipped", "delivery delay", "shipping slow",
+          "when will ship", "no tracking", "tracking not updated",
+          "stuck in transit", "backordered", "back order", "order delay",
+          "pre-order delay", "preorder delay"
+        ],
+        "keywords_zh": [
+          "發貨延遲", "還沒寄出", "等待發貨", "物流延遲"
+        ],
+        "patterns": [
+          "(?:ship|deliver|order|track).*(?:delay|slow|wait|stuck|late)",
+          "(?:label|tracking).*(?:created|not updated|no movement)",
+          "(?:hasn't|haven't|not).*(?:ship|arrived|deliver)",
+          "(?:when|where).*(?:ship|deliver|arrive)"
+        ]
+      },
+      "U1.2": {
+        "name": "Price / value discussion",
+        "name_zh": "价格/性价比讨论",
+        "keywords_en": [
+          "price", "expensive", "cheap", "cost", "value for money",
+          "worth it", "overpriced", "affordable", "budget", "pricing",
+          "good deal", "sale", "discount", "coupon", "promo"
+        ],
+        "keywords_zh": [
+          "價格", "貴", "便宜", "性價比", "值得", "優惠"
+        ],
+        "patterns": [
+          "(?:price|cost|pricing|value).*(?:good|bad|high|low|fair|worth)",
+          "(?:expensive|overpriced|cheap|affordable|budget)",
+          "(?:worth|value).*(?:money|price|it)"
+        ]
+      },
+      "U1.3": {
+        "name": "Accessory purchase difficulty",
+        "name_zh": "配件购买困难",
+        "keywords_en": [
+          "buy accessories", "spare parts", "replacement parts",
+          "where to buy", "out of stock", "can't buy", "parts unavailable",
+          "nozzle replacement", "extra toolhead", "accessory store",
+          "parts store"
+        ],
+        "keywords_zh": [
+          "配件購買", "零件", "備件", "缺貨"
+        ],
+        "patterns": [
+          "(?:buy|purchase|order|find).*(?:accessories|parts|spare|replacement|nozzle|toolhead)",
+          "(?:accessories|parts|spare|replacement).*(?:out of stock|unavailable|can't find|hard to find|where)"
+        ]
+      }
+    }
+  },
+  "U2": {
+    "name": "Unboxing / Setup",
+    "name_zh": "开箱/设置",
+    "subcategories": {
+      "U2.1": {
+        "name": "Initial setup failure",
+        "name_zh": "初始设置失败",
+        "keywords_en": [
+          "initial setup", "first setup", "setup fail", "setup issue",
+          "assembly issue", "can't setup", "setting up", "out of box",
+          "setup wizard", "setup guide", "setup problem"
+        ],
+        "keywords_zh": [
+          "初始設置", "安裝問題", "開箱設置", "設置失敗"
+        ],
+        "patterns": [
+          "(?:initial|first|out of box).*(?:setup|assembly|calibrat)",
+          "(?:setup|assembly).*(?:fail|issue|problem|can't|difficult)"
+        ]
+      },
+      "U2.2": {
+        "name": "Calibration issues",
+        "name_zh": "校准问题",
+        "keywords_en": [
+          "calibration fail", "auto calibration", "calibrate issue",
+          "bed leveling", "auto level", "leveling fail", "z calibration",
+          "calibration took", "calibration long", "recalibrate"
+        ],
+        "keywords_zh": [
+          "校準問題", "自動校準", "調平", "校準失敗"
+        ],
+        "patterns": [
+          "(?:auto\\s*)?calibrat.*(?:fail|issue|problem|long|took|error)",
+          "(?:bed|auto)?\\s*level.*(?:fail|issue|problem|error)",
+          "(?:z|nozzle).*calibrat"
+        ]
+      },
+      "U2.3": {
+        "name": "Packaging/shipping damage",
+        "name_zh": "包装/运输损坏",
+        "keywords_en": [
+          "damaged in shipping", "arrived damaged", "broken on arrival",
+          "packaging damage", "box damaged", "dented", "scratched",
+          "shipping damage", "bent", "cracked on arrival"
+        ],
+        "keywords_zh": [
+          "運輸損壞", "包裝損壞", "到貨破損"
+        ],
+        "patterns": [
+          "(?:damaged|broken|bent|dent|crack|scratch).*(?:shipping|arrival|box|package|transit)",
+          "(?:arrive|arrived|came|received).*(?:damaged|broken|bent|dent|crack|scratch)"
+        ]
+      }
+    }
+  },
+  "U3": {
+    "name": "Usage Experience",
+    "name_zh": "使用体验",
+    "subcategories": {
+      "U3.1": {
+        "name": "Noise too loud",
+        "name_zh": "噪音过大",
+        "keywords_en": [
+          "loud", "noisy", "noise level", "too loud", "very loud",
+          "noise", "sound level", "decibel", "db level", "quiet",
+          "how loud", "noise complaint"
+        ],
+        "keywords_zh": [
+          "噪音", "太吵", "聲音大", "分貝"
+        ],
+        "patterns": [
+          "(?:too|very|so|really|pretty)\\s*(?:loud|noisy)",
+          "noise.*(?:level|loud|issue|complaint|annoy)",
+          "(?:how|sound).*(?:loud|quiet|noise)"
+        ]
+      },
+      "U3.2": {
+        "name": "No enclosure",
+        "name_zh": "缺少封闭罩",
+        "keywords_en": [
+          "enclosure", "enclosed", "no enclosure", "open frame",
+          "need enclosure", "want enclosure", "enclosure option",
+          "cover", "chamber", "lack of enclosure"
+        ],
+        "keywords_zh": [
+          "封閉罩", "機箱", "外罩", "缺少封閉"
+        ],
+        "patterns": [
+          "(?:no|need|want|lack|without).*enclosure",
+          "enclosure.*(?:option|available|plan|announce|need|want)"
+        ]
+      },
+      "U3.3": {
+        "name": "Filament waste / poop chute",
+        "name_zh": "耗材浪费/poop chute 相关",
+        "keywords_en": [
+          "poop chute", "waste chute", "filament waste", "wasted filament",
+          "purge waste", "purge bin", "waste bin", "too much waste",
+          "material waste", "purge amount", "transition waste",
+          "color change waste", "poop bucket"
+        ],
+        "keywords_zh": [
+          "耗材浪費", "廢料", "排廢", "浪費太多"
+        ],
+        "patterns": [
+          "(?:poop|waste|purge)\\s*(?:chute|bin|bucket|tray|box)",
+          "(?:filament|material|purge|transition)\\s*waste",
+          "(?:too much|lot of|excessive)\\s*waste"
+        ]
+      },
+      "U3.4": {
+        "name": "Documentation/tutorial insufficient",
+        "name_zh": "文档/教程不足",
+        "keywords_en": [
+          "documentation", "tutorial", "guide", "manual", "instructions",
+          "no documentation", "poor documentation", "need tutorial",
+          "how to", "wiki", "help guide", "user manual", "quickstart"
+        ],
+        "keywords_zh": [
+          "文檔", "教程", "說明書", "指南"
+        ],
+        "patterns": [
+          "(?:no|poor|lack|need|want|where).*(?:documentation|tutorial|guide|manual|instruction|wiki)",
+          "(?:documentation|tutorial|guide|manual).*(?:poor|lacking|missing|incomplete|outdated)"
+        ]
+      }
+    }
+  },
+  "U4": {
+    "name": "After-sales / Support",
+    "name_zh": "售后/支持",
+    "subcategories": {
+      "U4.1": {
+        "name": "Customer service slow response",
+        "name_zh": "客服响应慢",
+        "keywords_en": [
+          "customer service", "support slow", "no response", "support ticket",
+          "waiting for support", "customer support", "help desk",
+          "support team", "response time", "unanswered", "support email",
+          "slow response", "cs response"
+        ],
+        "keywords_zh": [
+          "客服", "客服慢", "沒回應", "技術支持"
+        ],
+        "patterns": [
+          "(?:customer|tech)\\s*(?:service|support).*(?:slow|no response|unanswer|wait|bad|terrible)",
+          "(?:support|service)\\s*(?:ticket|email|response).*(?:slow|wait|no|unanswer)",
+          "(?:slow|no|bad|terrible|poor).*(?:response|support|service)"
+        ]
+      },
+      "U4.2": {
+        "name": "Warranty/return",
+        "name_zh": "保修/退换货",
+        "keywords_en": [
+          "warranty", "return", "refund", "replacement", "rma",
+          "send back", "return policy", "warranty claim", "exchange",
+          "money back", "return request"
+        ],
+        "keywords_zh": [
+          "保修", "退貨", "退款", "換貨", "保固"
+        ],
+        "patterns": [
+          "(?:warranty|return|refund|rma|replacement|exchange).*(?:claim|request|policy|process|issue)",
+          "(?:send|ship).*(?:back|return)"
+        ]
+      },
+      "U4.3": {
+        "name": "Official wiki/support docs missing",
+        "name_zh": "官方 Wiki/支持文档缺失",
+        "keywords_en": [
+          "official wiki", "support page", "knowledge base", "faq",
+          "help center", "support docs", "official documentation",
+          "snapmaker wiki", "support article"
+        ],
+        "keywords_zh": [
+          "官方文檔", "Wiki", "幫助中心", "知識庫"
+        ],
+        "patterns": [
+          "(?:official|snapmaker)\\s*(?:wiki|doc|documentation|support|faq|knowledge)",
+          "(?:wiki|faq|knowledge base|help center).*(?:miss|lacking|incomplete|outdated|where)"
+        ]
+      }
+    }
+  }
+}

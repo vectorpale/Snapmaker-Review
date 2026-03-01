@@ -1,0 +1,64 @@
+{
+  "positive_words": {
+    "strong": [
+      "love", "amazing", "fantastic", "excellent", "incredible", "outstanding",
+      "brilliant", "wonderful", "superb", "perfect", "flawless", "blown away",
+      "exceeded expectations", "best", "impressed", "phenomenal", "magnificent",
+      "absolutely love", "thrilled", "delighted", "spectacular", "jaw dropping",
+      "game changer", "must have", "highly recommend", "strongly recommend",
+      "愛", "驚艳", "完美", "太棒了", "超讚", "非常好", "強烈推薦", "超級滿意"
+    ],
+    "moderate": [
+      "great", "good", "nice", "happy", "pleased", "satisfied", "works well",
+      "pretty good", "solid", "decent", "reliable", "recommend", "worth it",
+      "enjoy", "like", "glad", "positive", "cool", "sweet", "awesome",
+      "好", "不錯", "滿意", "推薦", "開心", "值得"
+    ],
+    "mild": [
+      "ok", "okay", "fine", "alright", "not bad", "acceptable",
+      "does the job", "fair", "reasonable", "so far so good",
+      "還行", "可以", "尚可", "一般"
+    ]
+  },
+  "negative_words": {
+    "strong": [
+      "terrible", "horrible", "awful", "worst", "hate", "garbage", "trash",
+      "waste of money", "regret", "disgusted", "furious", "outrageous",
+      "unacceptable", "scam", "nightmare", "disaster", "catastrophe",
+      "deal breaker", "return it", "send it back", "want refund",
+      "垃圾", "最差", "後悔", "退貨", "浪費錢", "坑", "太爛了", "無法接受"
+    ],
+    "moderate": [
+      "disappointed", "frustrating", "frustrated", "annoying", "annoyed",
+      "issue", "problem", "fail", "failure", "broken", "defective",
+      "not working", "doesn't work", "won't work", "can't work",
+      "poor", "bad", "sucks", "useless", "unreliable", "dissatisfied",
+      "失望", "沮喪", "煩人", "問題", "故障", "壞了", "差"
+    ],
+    "mild": [
+      "concern", "worry", "worried", "wish", "hoping", "could be better",
+      "needs improvement", "not great", "not ideal", "meh", "underwhelming",
+      "mediocre", "lacking", "miss", "missing",
+      "擔心", "擔憂", "希望改進", "不太好"
+    ]
+  },
+  "negation_words": [
+    "not", "no", "never", "don't", "doesn't", "didn't", "won't", "wouldn't",
+    "can't", "cannot", "couldn't", "shouldn't", "isn't", "aren't", "wasn't",
+    "weren't", "hardly", "barely", "neither", "nor", "nothing", "nowhere",
+    "nobody", "none",
+    "不", "沒有", "沒", "不是", "不會", "無法", "從不"
+  ],
+  "intensifiers": [
+    "very", "really", "extremely", "incredibly", "absolutely", "totally",
+    "completely", "utterly", "highly", "seriously", "genuinely", "truly",
+    "非常", "極其", "超級", "特別", "真的"
+  ],
+  "question_indicators": [
+    "anyone", "anybody", "has anyone", "does anyone", "is anyone",
+    "how do i", "how to", "can i", "should i", "what is", "where can",
+    "help me", "advice", "recommend", "suggestion", "tips",
+    "?",
+    "有人", "如何", "怎麼", "哪裡", "請問", "求助"
+  ]
+}

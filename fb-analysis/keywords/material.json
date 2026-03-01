@@ -1,0 +1,145 @@
+{
+  "M1": {
+    "name": "Material Compatibility",
+    "name_zh": "耗材兼容性",
+    "subcategories": {
+      "M1.1": {
+        "name": "Third-party filament recognition issues",
+        "name_zh": "第三方耗材识别/配置问题",
+        "keywords_en": [
+          "third party filament", "3rd party", "non-snapmaker filament",
+          "other brand filament", "filament not recognized", "unknown filament",
+          "filament id", "rfid", "nfc tag", "filament detection",
+          "filament chip", "generic filament", "aftermarket filament"
+        ],
+        "keywords_zh": [
+          "第三方耗材", "非原廠耗材", "耗材識別", "耗材偵測"
+        ],
+        "patterns": [
+          "(?:third|3rd)\\s*party.*(?:filament|material|spool)",
+          "(?:filament|spool).*(?:not recogni|unknown|detect|rfid|nfc|chip)",
+          "(?:non|other|aftermarket|generic).*(?:filament|brand|spool)"
+        ]
+      },
+      "M1.2": {
+        "name": "Specific material printing difficulty",
+        "name_zh": "特定材料打印困难",
+        "keywords_en": [
+          "tpu print", "tpu issue", "petg issue", "petg problem",
+          "abs issue", "abs print", "nylon issue", "pa issue",
+          "polycarbonate", "pc filament", "flexible filament",
+          "tpu fail", "petg fail", "abs warp", "tpu clog",
+          "carbon fiber filament", "cf filament", "wood filament",
+          "silk filament"
+        ],
+        "keywords_zh": [
+          "TPU", "PETG", "ABS", "尼龍", "PA", "PC",
+          "柔性耗材", "碳纖維耗材"
+        ],
+        "patterns": [
+          "(?:tpu|petg|abs|nylon|pa|pc|polycarbonate).*(?:issue|problem|fail|clog|difficult|hard to print|trouble)",
+          "(?:issue|problem|fail|clog|difficult|hard|trouble).*(?:tpu|petg|abs|nylon|pa|pc)",
+          "(?:flexible|carbon fiber|cf|wood|silk)\\s*filament"
+        ]
+      },
+      "M1.3": {
+        "name": "Multi-material printing issues",
+        "name_zh": "多材料混合打印问题",
+        "keywords_en": [
+          "multi material", "multi-material", "pla and petg",
+          "mixed material", "different material", "support material",
+          "pva support", "material combo", "material combination",
+          "pla petg", "petg support", "multi filament"
+        ],
+        "keywords_zh": [
+          "多材料", "混合打印", "支撐材料", "多色打印"
+        ],
+        "patterns": [
+          "(?:multi|mixed|different)\\s*-?\\s*material",
+          "(?:pla|petg|abs).*(?:and|with|\\+).*(?:pla|petg|abs|pva|support)",
+          "(?:support|soluble)\\s*material"
+        ]
+      }
+    }
+  },
+  "M2": {
+    "name": "Filament Path / Feeding",
+    "name_zh": "耗材路径/进料",
+    "subcategories": {
+      "M2.1": {
+        "name": "Feed failure / clogging",
+        "name_zh": "进料失败/堵料",
+        "keywords_en": [
+          "clog", "clogging", "clogged", "jam", "jamming", "jammed",
+          "blocked nozzle", "nozzle clog", "feed fail", "feed issue",
+          "not feeding", "feed error", "filament stuck", "stuck filament",
+          "grinding filament", "stripped filament", "heat creep",
+          "partial clog", "nozzle blocked"
+        ],
+        "keywords_zh": [
+          "堵塞", "堵料", "堵頭", "進料失敗", "卡料", "耗材卡住"
+        ],
+        "patterns": [
+          "(?:nozzle|hotend|extruder).*(?:clog|jam|block|stuck)",
+          "(?:clog|jam|block|stuck).*(?:nozzle|hotend|extruder|filament)",
+          "(?:feed|load|extrude).*(?:fail|error|issue|problem)",
+          "(?:grind|strip|heat\\s*creep).*filament",
+          "filament.*(?:grind|strip|stuck|jam|clog)"
+        ]
+      },
+      "M2.2": {
+        "name": "Unloading issues",
+        "name_zh": "退料问题",
+        "keywords_en": [
+          "unload fail", "unloading issue", "retract fail",
+          "can't unload", "filament stuck", "won't unload",
+          "unload error", "eject filament", "remove filament",
+          "filament break during unload"
+        ],
+        "keywords_zh": [
+          "退料失敗", "退料問題", "無法退料"
+        ],
+        "patterns": [
+          "(?:unload|eject|remove|retract).*(?:fail|issue|error|stuck|problem|can't|won't)",
+          "(?:filament|material).*(?:unload|eject|remove).*(?:fail|issue|error|stuck)"
+        ]
+      },
+      "M2.3": {
+        "name": "PTFE tube friction",
+        "name_zh": "PTFE 管摩擦",
+        "keywords_en": [
+          "ptfe tube", "bowden tube", "ptfe friction", "tube friction",
+          "ptfe wear", "tube wear", "ptfe damage", "tube deform",
+          "filament path", "tube resistance"
+        ],
+        "keywords_zh": [
+          "PTFE管", "鐵氟龍管", "管路摩擦"
+        ],
+        "patterns": [
+          "(?:ptfe|bowden|teflon)\\s*tube",
+          "(?:ptfe|bowden|tube).*(?:friction|wear|damage|deform|resistance)",
+          "filament\\s*path.*(?:friction|resistance|issue)"
+        ]
+      },
+      "M2.4": {
+        "name": "Filament moisture (no dry storage)",
+        "name_zh": "耗材受潮",
+        "keywords_en": [
+          "moisture", "wet filament", "damp filament", "filament dry",
+          "dry box", "drying", "dehydrator", "humid", "humidity",
+          "moisture absorption", "filament dryer", "no enclosure dry",
+          "popping sound", "bubbling filament"
+        ],
+        "keywords_zh": [
+          "受潮", "潮濕", "烘乾", "乾燥箱", "除濕"
+        ],
+        "patterns": [
+          "(?:filament|material|spool).*(?:moisture|wet|damp|dry|humid)",
+          "(?:moisture|wet|damp|humid).*(?:filament|material|spool)",
+          "(?:dry|drying)\\s*(?:box|cabinet|storage|filament)",
+          "(?:pop|bubble|crack).*(?:sound|noise).*(?:print|extrude)"
+        ]
+      }
+    }
+  }
+}

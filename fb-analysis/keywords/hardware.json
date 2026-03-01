@@ -1,0 +1,403 @@
+{
+  "H1": {
+    "name": "Toolhead Issues",
+    "name_zh": "工具头问题",
+    "subcategories": {
+      "H1.1": {
+        "name": "Toolhead picking/parking failure",
+        "name_zh": "工具头拾取/停放失败",
+        "keywords_en": [
+          "picking fail", "parking fail", "tool change fail", "failed to pick",
+          "couldn't pick up", "toolhead swap fail", "pick up error", "pick error",
+          "parking error", "tool pick", "tool park", "docking fail", "undock fail",
+          "toolhead pick", "toolhead park", "pick up issue", "failed to dock",
+          "won't pick up", "won't park", "doesn't pick", "doesn't park",
+          "picking issue", "parking issue", "tool swap", "head swap fail",
+          "failed picking", "failed parking", "tool change error", "head change fail"
+        ],
+        "keywords_zh": [
+          "拾取失敗", "停放失敗", "換頭失敗", "工具頭拾取", "工具頭停放",
+          "對接失敗", "換頭錯誤", "拾取錯誤", "停放錯誤"
+        ],
+        "patterns": [
+          "tool\\s*head.*(?:fail|error|issue|problem)",
+          "(?:pick|dock|park).*(?:fail|error|issue)",
+          "(?:fail|error).*(?:pick|dock|park)",
+          "tool\\s*change.*(?:fail|error|issue|problem)"
+        ]
+      },
+      "H1.2": {
+        "name": "Toolhead calibration offset",
+        "name_zh": "工具头校准偏移",
+        "keywords_en": [
+          "calibration offset", "misalignment", "misaligned", "offset",
+          "nozzle offset", "toolhead alignment", "tool offset", "xy offset",
+          "z offset", "alignment issue", "calibration issue", "out of alignment",
+          "not aligned", "head offset", "nozzle misalign", "calibration error"
+        ],
+        "keywords_zh": [
+          "校準偏移", "對齊問題", "偏移", "校準錯誤", "噴嘴偏移"
+        ],
+        "patterns": [
+          "(?:tool|nozzle|head).*(?:offset|misalign|alignment)",
+          "(?:offset|misalign).*(?:tool|nozzle|head)",
+          "calibrat.*(?:off|wrong|issue|error|fail)"
+        ]
+      },
+      "H1.3": {
+        "name": "Toolhead crash/collision",
+        "name_zh": "工具头碰撞",
+        "keywords_en": [
+          "toolhead crash", "head crash", "collision", "crashed into",
+          "nozzle crash", "hit the bed", "hit the print", "crashed",
+          "toolhead collision", "head collision", "smash", "ran into"
+        ],
+        "keywords_zh": [
+          "碰撞", "撞擊", "撞到", "工具頭碰撞"
+        ],
+        "patterns": [
+          "(?:tool|head|nozzle).*(?:crash|collid|collision|smash|hit)",
+          "crash.*(?:tool|head|nozzle|bed|print)"
+        ]
+      },
+      "H1.4": {
+        "name": "Pogo pin contact issues",
+        "name_zh": "Pogopin 接触异常",
+        "keywords_en": [
+          "pogo pin", "pogopin", "pogo-pin", "contact error", "pin contact",
+          "electrical contact", "connection pins", "spring pin", "contact issue",
+          "poor contact", "pin issue"
+        ],
+        "keywords_zh": [
+          "彈簧針", "接觸不良", "引腳接觸", "彈針"
+        ],
+        "patterns": [
+          "pogo\\s*-?\\s*pin",
+          "(?:contact|connect).*(?:pin|pogo)",
+          "pin.*(?:contact|connect).*(?:issue|error|fail|poor)"
+        ]
+      },
+      "H1.5": {
+        "name": "Toolhead heating issues",
+        "name_zh": "工具头加热问题",
+        "keywords_en": [
+          "heating failure", "temp error", "temperature error", "heater error",
+          "thermal runaway", "not heating", "won't heat", "heat up issue",
+          "hotend temp", "nozzle temp error", "heating issue", "heater fail",
+          "temperature drop", "temp drop", "heating problem", "overheating"
+        ],
+        "keywords_zh": [
+          "加熱失敗", "溫度錯誤", "加熱問題", "熱失控", "無法加熱"
+        ],
+        "patterns": [
+          "(?:heat|temp|thermal).*(?:error|fail|issue|problem|runaway)",
+          "(?:error|fail|issue).*(?:heat|temp|thermal)",
+          "(?:nozzle|hotend|tool).*(?:temp|heat).*(?:error|fail|issue|drop)"
+        ]
+      }
+    }
+  },
+  "H2": {
+    "name": "Print Quality Issues",
+    "name_zh": "打印质量问题",
+    "subcategories": {
+      "H2.1": {
+        "name": "Layer shifting",
+        "name_zh": "层偏移",
+        "keywords_en": [
+          "layer shift", "layer shifting", "layers shifted", "shifted layers",
+          "layer offset", "layers misaligned", "shifted print", "layer skip",
+          "skipped layer", "layer misalignment"
+        ],
+        "keywords_zh": [
+          "層偏移", "層移位", "錯層", "偏層"
+        ],
+        "patterns": [
+          "layer.*(?:shift|offset|misalign|skip)",
+          "(?:shift|offset|misalign|skip).*layer"
+        ]
+      },
+      "H2.2": {
+        "name": "Stringing/oozing",
+        "name_zh": "拉丝/溢料",
+        "keywords_en": [
+          "stringing", "string", "strings", "oozing", "ooze", "dripping",
+          "filament drip", "nozzle drip", "retraction", "retract issue",
+          "cobweb", "whisker", "hairy print"
+        ],
+        "keywords_zh": [
+          "拉絲", "溢料", "滴料", "回抽"
+        ],
+        "patterns": [
+          "string(?:ing|s)?",
+          "ooz(?:ing|e)",
+          "(?:filament|nozzle).*drip"
+        ]
+      },
+      "H2.3": {
+        "name": "First layer adhesion",
+        "name_zh": "首层附着力",
+        "keywords_en": [
+          "first layer", "adhesion", "bed adhesion", "not sticking",
+          "won't stick", "doesn't stick", "poor adhesion", "lifted",
+          "lifting", "peeling off", "came off bed", "detached from bed",
+          "first layer issue", "bed leveling", "squish"
+        ],
+        "keywords_zh": [
+          "首層", "附著力", "黏不住", "翹起", "脫離", "第一層"
+        ],
+        "patterns": [
+          "first\\s*layer.*(?:adhes|stick|issue|problem|fail)",
+          "(?:bed|plate).*adhes",
+          "(?:not|won't|doesn't|poor).*(?:stick|adhes)"
+        ]
+      },
+      "H2.4": {
+        "name": "Warping/deformation",
+        "name_zh": "翘曲/变形",
+        "keywords_en": [
+          "warping", "warp", "warped", "deformation", "deformed",
+          "curling", "curl", "curled", "corner lift", "lifting corners"
+        ],
+        "keywords_zh": [
+          "翹曲", "變形", "捲曲", "角落翹起"
+        ],
+        "patterns": [
+          "warp(?:ing|ed)?",
+          "(?:corner|edge).*(?:lift|curl)"
+        ]
+      },
+      "H2.5": {
+        "name": "Poor surface quality",
+        "name_zh": "表面质量差",
+        "keywords_en": [
+          "surface quality", "blobbing", "blob", "blobs", "zit", "zits",
+          "rough surface", "bumpy", "pimple", "artifact", "scarring",
+          "surface defect", "uneven surface", "inconsistent surface",
+          "rough print", "ugly surface"
+        ],
+        "keywords_zh": [
+          "表面質量", "疙瘩", "凸起", "表面粗糙", "表面缺陷"
+        ],
+        "patterns": [
+          "(?:surface|print).*(?:quality|rough|bumpy|ugly|defect)",
+          "blob(?:bing|s)?",
+          "zit(?:s)?"
+        ]
+      },
+      "H2.6": {
+        "name": "Under/over extrusion",
+        "name_zh": "挤出不足/过度",
+        "keywords_en": [
+          "under extrusion", "underextrusion", "over extrusion", "overextrusion",
+          "under-extrusion", "over-extrusion", "not extruding enough",
+          "too much extrusion", "extrusion issue", "flow rate", "flow issue",
+          "gaps in layers", "thin walls", "inconsistent extrusion"
+        ],
+        "keywords_zh": [
+          "擠出不足", "過度擠出", "擠出問題", "出料不均"
+        ],
+        "patterns": [
+          "(?:under|over)\\s*-?\\s*extru(?:sion|ding)",
+          "extru(?:sion|ding).*(?:issue|problem|inconsistent)",
+          "(?:flow|extrusion)\\s*(?:rate|issue|problem)"
+        ]
+      },
+      "H2.7": {
+        "name": "Prime tower failure",
+        "name_zh": "Prime tower 失败",
+        "keywords_en": [
+          "prime tower", "purge tower", "wipe tower", "prime tower fail",
+          "tower collapse", "tower fell", "tower detach", "tower issue"
+        ],
+        "keywords_zh": [
+          "擦拭塔", "清除塔", "引導塔"
+        ],
+        "patterns": [
+          "(?:prime|purge|wipe)\\s*tower",
+          "tower.*(?:fail|collaps|fell|detach|issue)"
+        ]
+      }
+    }
+  },
+  "H3": {
+    "name": "Mechanical Structure",
+    "name_zh": "机械结构",
+    "subcategories": {
+      "H3.1": {
+        "name": "Plastic shell popping off",
+        "name_zh": "塑料外壳松脱/脆弱",
+        "keywords_en": [
+          "plastic shell", "shell popping", "cover fell", "panel loose",
+          "plastic cover", "shell crack", "housing crack", "cover detach",
+          "plastic piece", "clip broke", "cover pop", "panel pop",
+          "shell loose", "plastic housing"
+        ],
+        "keywords_zh": [
+          "塑料外殼", "外殼脫落", "面板鬆動", "外殼裂開"
+        ],
+        "patterns": [
+          "(?:plastic|shell|cover|panel|housing).*(?:pop|fell|loose|crack|broke|detach)",
+          "(?:pop|fell|loose|crack|broke|detach).*(?:plastic|shell|cover|panel|housing)"
+        ]
+      },
+      "H3.2": {
+        "name": "Carbon rod wear",
+        "name_zh": "碳纤维导轨磨损",
+        "keywords_en": [
+          "carbon rod", "carbon fiber rod", "carbon rail", "rod wear",
+          "rod scratched", "guide rod", "rod groove", "rod damage",
+          "linear rail", "carbon tube"
+        ],
+        "keywords_zh": [
+          "碳纖維", "導軌磨損", "碳棒", "導軌"
+        ],
+        "patterns": [
+          "carbon.*(?:rod|rail|fiber|tube)",
+          "(?:rod|rail).*(?:wear|scratch|groove|damage)"
+        ]
+      },
+      "H3.3": {
+        "name": "Belt/motion system noise",
+        "name_zh": "皮带/运动系统噪音异响",
+        "keywords_en": [
+          "belt noise", "belt tension", "belt loose", "grinding noise",
+          "squeaking", "squeak", "rattling", "rattle", "vibration",
+          "loud noise", "motor noise", "stepper noise", "resonance",
+          "belt skip", "belt issue", "belt slipping"
+        ],
+        "keywords_zh": [
+          "皮帶", "噪音", "異響", "振動", "馬達噪音", "共振"
+        ],
+        "patterns": [
+          "belt.*(?:noise|tension|loose|skip|slip|issue)",
+          "(?:grinding|squeak|rattle|vibrat).*(?:noise|sound)",
+          "(?:motor|stepper).*(?:noise|sound|loud)"
+        ]
+      },
+      "H3.4": {
+        "name": "Fan issues",
+        "name_zh": "风扇问题",
+        "keywords_en": [
+          "fan noise", "fan dust", "fan failure", "fan not working",
+          "fan broken", "fan loud", "fan speed", "part cooling fan",
+          "fan vibration", "fan rattle", "fan issue"
+        ],
+        "keywords_zh": [
+          "風扇", "風扇噪音", "風扇故障", "風扇灰塵"
+        ],
+        "patterns": [
+          "fan.*(?:noise|dust|fail|broken|loud|issue|rattle|vibrat)",
+          "(?:part|print)\\s*cool.*fan"
+        ]
+      },
+      "H3.5": {
+        "name": "Build plate issues",
+        "name_zh": "构建板问题",
+        "keywords_en": [
+          "build plate", "bed plate", "pei sheet", "pei surface",
+          "print bed", "bed surface", "plate scratch", "plate warp",
+          "textured plate", "smooth plate", "bed issue", "plate issue",
+          "flex plate", "spring steel", "plate coating"
+        ],
+        "keywords_zh": [
+          "構建板", "打印床", "PEI", "鋼板", "底板"
+        ],
+        "patterns": [
+          "(?:build|bed|print|flex)\\s*plate",
+          "pei\\s*(?:sheet|surface)",
+          "(?:plate|bed).*(?:scratch|warp|issue|damage|coating)"
+        ]
+      }
+    }
+  },
+  "H4": {
+    "name": "Electrical/Connection",
+    "name_zh": "电气/连接",
+    "subcategories": {
+      "H4.1": {
+        "name": "WiFi connection issues",
+        "name_zh": "WiFi 连接不稳定/断连",
+        "keywords_en": [
+          "wifi", "wi-fi", "wireless", "wifi disconnect", "wifi drop",
+          "wifi issue", "wifi unstable", "connection drop", "network issue",
+          "wifi not working", "can't connect wifi", "wifi problem",
+          "wireless connection", "wifi keeps disconnecting"
+        ],
+        "keywords_zh": [
+          "WiFi", "無線", "斷線", "連接問題", "網路問題"
+        ],
+        "patterns": [
+          "wi-?fi.*(?:disconnect|drop|issue|unstable|problem|fail|not work)",
+          "(?:disconnect|drop|issue|unstable|problem).*wi-?fi",
+          "wireless.*(?:connect|issue|problem)"
+        ]
+      },
+      "H4.2": {
+        "name": "Touchscreen issues",
+        "name_zh": "屏幕问题",
+        "keywords_en": [
+          "touchscreen", "touch screen", "screen issue", "screen not responding",
+          "display issue", "screen freeze", "screen blank", "screen glitch",
+          "unresponsive screen", "screen crack"
+        ],
+        "keywords_zh": [
+          "觸控螢幕", "螢幕問題", "螢幕不回應", "螢幕故障"
+        ],
+        "patterns": [
+          "(?:touch)?\\s*screen.*(?:issue|problem|fail|freeze|blank|glitch|crack|unrespons)",
+          "display.*(?:issue|problem|fail|blank|glitch)"
+        ]
+      },
+      "H4.3": {
+        "name": "USB/network connection issues",
+        "name_zh": "USB/网络连接问题",
+        "keywords_en": [
+          "usb issue", "usb not working", "usb connection", "usb drive",
+          "usb stick", "ethernet", "lan connection", "network cable",
+          "usb not detected", "usb error"
+        ],
+        "keywords_zh": [
+          "USB", "網路連接", "有線網路"
+        ],
+        "patterns": [
+          "usb.*(?:issue|problem|fail|not work|error|not detect)",
+          "(?:ethernet|lan).*(?:issue|problem|connect)"
+        ]
+      },
+      "H4.4": {
+        "name": "Power related issues",
+        "name_zh": "电源相关问题",
+        "keywords_en": [
+          "power issue", "power supply", "power off", "shut down",
+          "random shutdown", "power loss", "lost power", "psu",
+          "power brick", "electrical issue", "power surge"
+        ],
+        "keywords_zh": [
+          "電源問題", "斷電", "電源供應", "關機"
+        ],
+        "patterns": [
+          "power.*(?:issue|problem|fail|off|loss|surge|supply)",
+          "(?:random|unexpected).*(?:shutdown|shut down|power off)"
+        ]
+      },
+      "H4.5": {
+        "name": "Sensor failures",
+        "name_zh": "传感器故障",
+        "keywords_en": [
+          "filament sensor", "runout sensor", "sensor failure", "sensor error",
+          "sensor issue", "false trigger", "sensor not working", "probe issue",
+          "bl touch", "inductive sensor", "endstop"
+        ],
+        "keywords_zh": [
+          "傳感器", "斷料檢測", "感測器故障", "探針"
+        ],
+        "patterns": [
+          "(?:filament|runout|probe)\\s*sensor",
+          "sensor.*(?:fail|error|issue|not work|false trigger)",
+          "(?:bl|auto)\\s*(?:touch|level|probe).*(?:issue|error|fail)"
+        ]
+      }
+    }
+  }
+}
