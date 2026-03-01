@@ -180,12 +180,7 @@ class LLMClient:
         self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
 
     def _call_llm(self, prompt: str, max_retries: int = 3) -> str:
-        """Call LLM with retry logic. Disables thinking mode for Qwen 3.5+ models."""
-        # Build extra parameters to disable thinking mode on Qwen 3.5+
-        extra_body = {}
-        if "qwen3" in self.model.lower():
-            extra_body["enable_thinking"] = False
-
+        """Call LLM with retry logic."""
         for attempt in range(max_retries):
             try:
                 response = self.client.chat.completions.create(
@@ -196,7 +191,6 @@ class LLMClient:
                     ],
                     temperature=0.1,
                     max_tokens=4096,
-                    **({"extra_body": extra_body} if extra_body else {}),
                 )
                 return response.choices[0].message.content.strip()
             except Exception as e:
