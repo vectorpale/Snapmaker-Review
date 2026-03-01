@@ -1,7 +1,9 @@
 """
-PPTX report generator for Snapmaker U1 Facebook feedback analysis.
+Snapmaker U1 Facebook 用户反馈分析 PPTX 报告生成器
 
-Generates a professional ~15-20 slide report with charts and data.
+输出语言：简体中文（用户原文以括号标注英文原文）
+中文字体：等线 (DengXian)
+英文字体：Calibri
 """
 
 import io
@@ -18,11 +20,8 @@ from pptx import Presentation
 from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
-from pptx.enum.chart import XL_CHART_TYPE
 
-from classifier import CATEGORY_NAMES, L1_NAMES
-
-# ── Color scheme ──────────────────────────────────────────────────
+# ── 颜色方案 ─────────────────────────────────────────────────────
 DARK_BLUE = RGBColor(0x1B, 0x3A, 0x5C)
 ORANGE = RGBColor(0xE8, 0x73, 0x2A)
 LIGHT_GRAY = RGBColor(0xF2, 0xF2, 0xF2)
@@ -31,8 +30,9 @@ TEXT_DARK = RGBColor(0x33, 0x33, 0x33)
 TEXT_LIGHT = RGBColor(0x66, 0x66, 0x66)
 ACCENT_GREEN = RGBColor(0x27, 0xAE, 0x60)
 ACCENT_RED = RGBColor(0xE7, 0x4C, 0x3C)
+ACCENT_YELLOW = RGBColor(0xF3, 0x9C, 0x12)
 
-# Matplotlib color palette
+# Matplotlib 颜色
 MPL_DARK_BLUE = "#1B3A5C"
 MPL_ORANGE = "#E8732A"
 MPL_LIGHT_BLUE = "#3498DB"
@@ -50,6 +50,23 @@ CHART_COLORS = [
     MPL_GRAY, MPL_PINK,
 ]
 
+# 主贴五分类颜色
+PRIMARY_CAT_COLORS = {
+    "问题/求助": MPL_ORANGE,
+    "打印结果展示/晒作品": MPL_LIGHT_BLUE,
+    "正面评价": MPL_GREEN,
+    "负面评价": MPL_RED,
+    "无意义": MPL_GRAY,
+}
+
+PRIMARY_CAT_EN = {
+    "问题/求助": "Questions / Help",
+    "打印结果展示/晒作品": "Print Showcase",
+    "正面评价": "Positive Reviews",
+    "负面评价": "Negative Reviews",
+    "无意义": "Irrelevant",
+}
+
 SENTIMENT_COLORS = {
     "positive": MPL_GREEN,
     "negative": MPL_RED,
@@ -57,25 +74,13 @@ SENTIMENT_COLORS = {
     "mixed": MPL_YELLOW,
 }
 
-SATISFACTION_COLORS = [MPL_RED, MPL_ORANGE, MPL_YELLOW, MPL_LIGHT_BLUE, MPL_GREEN]
-
-# Font names
-FONT_EN = "Arial"
-FONT_ZH = "Microsoft YaHei"
-
-
-def _try_font(name_list):
-    """Return first available font from list."""
-    import matplotlib.font_manager as fm
-    available = set(f.name for f in fm.fontManager.ttflist)
-    for name in name_list:
-        if name in available:
-            return name
-    return name_list[0]
+# 字体名称
+FONT_ZH = "DengXian"  # 等线
+FONT_EN = "Calibri"
 
 
 def _setup_matplotlib():
-    """Configure matplotlib defaults."""
+    """配置 matplotlib 默认设置。"""
     plt.rcParams.update({
         "figure.facecolor": "white",
         "axes.facecolor": "white",
@@ -85,10 +90,10 @@ def _setup_matplotlib():
         "grid.color": "#CCCCCC",
         "font.size": 11,
     })
-    # Try to set a font that supports CJK
-    for font in ["Microsoft YaHei", "SimHei", "Arial Unicode MS", "DejaVu Sans"]:
+    # 尝试设置支持中文的字体
+    for font in ["DengXian", "Microsoft YaHei", "SimHei", "Arial Unicode MS", "DejaVu Sans"]:
         try:
-            plt.rcParams["font.sans-serif"] = [font, "Arial", "DejaVu Sans"]
+            plt.rcParams["font.sans-serif"] = [font, "Calibri", "DejaVu Sans"]
             break
         except Exception:
             continue
@@ -96,16 +101,9 @@ def _setup_matplotlib():
 
 
 class ReportGenerator:
-    """Generates PPTX report from analysis results."""
+    """生成 PPTX 分析报告。"""
 
     def __init__(self, analysis_data: Dict[str, Any]):
-        """
-        Args:
-            analysis_data: dict containing:
-              - posts: list of analyzed post dicts
-              - summary: dict with aggregated statistics
-              - metadata: dict with data source info
-        """
         self.data = analysis_data
         self.posts = analysis_data.get("posts", [])
         self.summary = analysis_data.get("summary", {})
@@ -115,43 +113,37 @@ class ReportGenerator:
         self.prs.slide_height = Inches(7.5)
         _setup_matplotlib()
 
-    # ── Helpers ────────────────────────────────────────────────────
+    # ── 基础工具方法 ──────────────────────────────────────────────
 
     def _add_blank_slide(self):
-        """Add a blank slide and return it."""
-        layout = self.prs.slide_layouts[6]  # Blank layout
+        layout = self.prs.slide_layouts[6]  # Blank
         return self.prs.slides.add_slide(layout)
 
     def _add_title_bar(self, slide, title_text: str, page_num: int = None):
-        """Add a colored title bar at the top of a slide."""
-        # Dark blue bar
-        from pptx.util import Emu
+        """添加顶部深蓝色标题栏。"""
         left, top = Inches(0), Inches(0)
         width, height = self.prs.slide_width, Inches(0.9)
-        shape = slide.shapes.add_shape(1, left, top, width, height)  # 1 = rectangle
+        shape = slide.shapes.add_shape(1, left, top, width, height)
         shape.fill.solid()
         shape.fill.fore_color.rgb = DARK_BLUE
         shape.line.fill.background()
 
-        # Title text
         txBox = slide.shapes.add_textbox(Inches(0.5), Inches(0.12), Inches(10), Inches(0.65))
         tf = txBox.text_frame
         tf.word_wrap = True
         p = tf.paragraphs[0]
         p.text = title_text
-        p.font.size = Pt(26)
+        p.font.size = Pt(24)
         p.font.bold = True
         p.font.color.rgb = WHITE
-        p.font.name = FONT_EN
+        p.font.name = FONT_ZH
 
-        # Page number on right side
         if page_num is not None:
             pn_box = slide.shapes.add_textbox(
                 self.prs.slide_width - Inches(1.5), Inches(0.15),
                 Inches(1.2), Inches(0.6)
             )
-            pn_tf = pn_box.text_frame
-            pn_p = pn_tf.paragraphs[0]
+            pn_p = pn_box.text_frame.paragraphs[0]
             pn_p.text = str(page_num)
             pn_p.alignment = PP_ALIGN.RIGHT
             pn_p.font.size = Pt(14)
@@ -159,8 +151,8 @@ class ReportGenerator:
             pn_p.font.name = FONT_EN
 
     def _add_text_box(self, slide, left, top, width, height, text,
-                      font_size=14, bold=False, color=TEXT_DARK, alignment=PP_ALIGN.LEFT):
-        """Add a text box to a slide."""
+                      font_size=14, bold=False, color=TEXT_DARK,
+                      alignment=PP_ALIGN.LEFT, font_name=None):
         txBox = slide.shapes.add_textbox(left, top, width, height)
         tf = txBox.text_frame
         tf.word_wrap = True
@@ -169,32 +161,27 @@ class ReportGenerator:
         p.font.size = Pt(font_size)
         p.font.bold = bold
         p.font.color.rgb = color
-        p.font.name = FONT_EN
+        p.font.name = font_name or FONT_ZH
         p.alignment = alignment
         return txBox
 
     def _add_bullet_list(self, slide, left, top, width, height, items,
                          font_size=13, color=TEXT_DARK):
-        """Add a bullet list text box."""
         txBox = slide.shapes.add_textbox(left, top, width, height)
         tf = txBox.text_frame
         tf.word_wrap = True
 
         for i, item in enumerate(items):
-            if i == 0:
-                p = tf.paragraphs[0]
-            else:
-                p = tf.add_paragraph()
+            p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
             p.text = f"• {item}"
             p.font.size = Pt(font_size)
             p.font.color.rgb = color
-            p.font.name = FONT_EN
+            p.font.name = FONT_ZH
             p.space_after = Pt(4)
 
         return txBox
 
     def _fig_to_image(self, fig) -> io.BytesIO:
-        """Convert matplotlib figure to PNG bytes buffer."""
         buf = io.BytesIO()
         fig.savefig(buf, format="png", dpi=150, bbox_inches="tight",
                     facecolor="white", edgecolor="none")
@@ -203,48 +190,22 @@ class ReportGenerator:
         return buf
 
     def _add_chart_image(self, slide, fig, left, top, width, height=None):
-        """Add a matplotlib figure as an image to the slide."""
         buf = self._fig_to_image(fig)
         if height is None:
             slide.shapes.add_picture(buf, left, top, width=width)
         else:
             slide.shapes.add_picture(buf, left, top, width=width, height=height)
 
-    # ── Chart builders ─────────────────────────────────────────────
-
-    def _make_horizontal_bar(self, labels, values, title="", color=MPL_DARK_BLUE,
-                             figsize=(8, 5), value_fmt="{:.0f}"):
-        """Create a horizontal bar chart."""
-        fig, ax = plt.subplots(figsize=figsize)
-        y_pos = range(len(labels))
-        bars = ax.barh(y_pos, values, color=color, height=0.6, edgecolor="white")
-        ax.set_yticks(y_pos)
-        ax.set_yticklabels(labels, fontsize=10)
-        ax.invert_yaxis()
-        ax.set_xlabel("Count", fontsize=11)
-        if title:
-            ax.set_title(title, fontsize=14, fontweight="bold", color=MPL_DARK_BLUE, pad=12)
-        ax.spines["top"].set_visible(False)
-        ax.spines["right"].set_visible(False)
-
-        # Add value labels
-        for bar, val in zip(bars, values):
-            ax.text(bar.get_width() + max(values) * 0.02, bar.get_y() + bar.get_height() / 2,
-                    value_fmt.format(val), va="center", fontsize=10, color=MPL_DARK_BLUE)
-
-        fig.tight_layout()
-        return fig
+    # ── 图表工具 ─────────────────────────────────────────────────
 
     def _make_pie_chart(self, labels, values, title="", colors=None, figsize=(5, 5)):
-        """Create a pie chart."""
         fig, ax = plt.subplots(figsize=figsize)
         if colors is None:
             colors = CHART_COLORS[:len(labels)]
 
-        # Filter out zero values
         filtered = [(l, v, c) for l, v, c in zip(labels, values, colors) if v > 0]
         if not filtered:
-            ax.text(0.5, 0.5, "No data", ha="center", va="center", fontsize=14)
+            ax.text(0.5, 0.5, "暂无数据", ha="center", va="center", fontsize=14)
             return fig
         labels_f, values_f, colors_f = zip(*filtered)
 
@@ -260,181 +221,126 @@ class ReportGenerator:
             autotext.set_fontweight("bold")
 
         if title:
-            ax.set_title(title, fontsize=14, fontweight="bold", color=MPL_DARK_BLUE, pad=12)
+            ax.set_title(title, fontsize=13, fontweight="bold", color=MPL_DARK_BLUE, pad=12)
+
+        fig.tight_layout()
+        return fig
+
+    def _make_horizontal_bar(self, labels, values, title="", colors=None,
+                             figsize=(8, 5), value_fmt="{:.0f}"):
+        fig, ax = plt.subplots(figsize=figsize)
+        y_pos = range(len(labels))
+        bar_colors = colors if colors else [MPL_DARK_BLUE] * len(labels)
+        if isinstance(bar_colors, str):
+            bar_colors = [bar_colors] * len(labels)
+
+        bars = ax.barh(y_pos, values, color=bar_colors, height=0.6, edgecolor="white")
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(labels, fontsize=10)
+        ax.invert_yaxis()
+        ax.set_xlabel("数量", fontsize=11)
+        if title:
+            ax.set_title(title, fontsize=13, fontweight="bold", color=MPL_DARK_BLUE, pad=12)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+        max_val = max(values) if values else 1
+        for bar, val in zip(bars, values):
+            ax.text(bar.get_width() + max_val * 0.02,
+                    bar.get_y() + bar.get_height() / 2,
+                    value_fmt.format(val), va="center", fontsize=10, color=MPL_DARK_BLUE)
 
         fig.tight_layout()
         return fig
 
     def _make_bar_chart(self, labels, values, title="", colors=None, figsize=(7, 5)):
-        """Create a vertical bar chart."""
         fig, ax = plt.subplots(figsize=figsize)
         if colors is None:
             colors = [MPL_DARK_BLUE] * len(labels)
         x_pos = range(len(labels))
         bars = ax.bar(x_pos, values, color=colors, width=0.6, edgecolor="white")
         ax.set_xticks(x_pos)
-        ax.set_xticklabels(labels, fontsize=10, rotation=0)
-        ax.set_ylabel("Count", fontsize=11)
+        ax.set_xticklabels(labels, fontsize=9, rotation=20, ha="right")
+        ax.set_ylabel("数量", fontsize=11)
         if title:
-            ax.set_title(title, fontsize=14, fontweight="bold", color=MPL_DARK_BLUE, pad=12)
+            ax.set_title(title, fontsize=13, fontweight="bold", color=MPL_DARK_BLUE, pad=12)
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
         ax.yaxis.set_major_locator(mticker.MaxNLocator(integer=True))
 
+        max_val = max(values) if values else 1
         for bar, val in zip(bars, values):
-            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + max(values) * 0.02,
+            ax.text(bar.get_x() + bar.get_width() / 2,
+                    bar.get_height() + max_val * 0.02,
                     str(int(val)), ha="center", fontsize=10, color=MPL_DARK_BLUE)
 
         fig.tight_layout()
         return fig
 
-    # ── Slide builders ─────────────────────────────────────────────
+    # ── 幻灯片构建 ───────────────────────────────────────────────
 
     def _build_cover_slide(self):
-        """Build the cover / title slide."""
+        """封面页。"""
         slide = self._add_blank_slide()
 
-        # Background gradient effect: dark blue rectangle
+        # 深蓝色背景
         shape = slide.shapes.add_shape(1, Inches(0), Inches(0),
                                        self.prs.slide_width, self.prs.slide_height)
         shape.fill.solid()
         shape.fill.fore_color.rgb = DARK_BLUE
         shape.line.fill.background()
 
-        # Orange accent bar
-        shape2 = slide.shapes.add_shape(1, Inches(0.8), Inches(3.2),
+        # 橙色装饰线
+        shape2 = slide.shapes.add_shape(1, Inches(0.8), Inches(3.4),
                                         Inches(4), Inches(0.06))
         shape2.fill.solid()
         shape2.fill.fore_color.rgb = ORANGE
         shape2.line.fill.background()
 
-        # Title
-        self._add_text_box(slide, Inches(0.8), Inches(1.2), Inches(11), Inches(1.5),
-                           "Snapmaker U1", font_size=44, bold=True, color=WHITE)
+        # 标题
+        self._add_text_box(slide, Inches(0.8), Inches(1.0), Inches(11), Inches(1.2),
+                           "Snapmaker U1", font_size=44, bold=True, color=WHITE,
+                           font_name=FONT_EN)
         self._add_text_box(slide, Inches(0.8), Inches(2.2), Inches(11), Inches(1),
-                           "Facebook User Feedback Analysis Report",
-                           font_size=28, bold=False, color=RGBColor(0xCC, 0xDD, 0xEE))
+                           "Facebook 用户反馈分析报告",
+                           font_size=28, bold=True, color=RGBColor(0xCC, 0xDD, 0xEE))
 
-        # Subtitle info
+        # 副标题
         total_posts = self.metadata.get("total_posts", 0)
         total_comments = self.metadata.get("total_comments", 0)
         group_name = self.metadata.get("group_name", "Snapmaker U1 Official Group")
         extraction_time = self.metadata.get("extraction_time", "")
+        llm_tag = "  |  LLM 增强分析" if self.metadata.get("llm_enabled") else ""
 
-        subtitle = f"Data source: {group_name}\n"
-        subtitle += f"Total posts: {total_posts} | Total comments: {total_comments}\n"
+        subtitle = f"数据来源 (Data Source): {group_name}\n"
+        subtitle += f"帖子总数 (Total Posts): {total_posts}  |  评论总数 (Total Comments): {total_comments}{llm_tag}\n"
         if extraction_time:
             date_part = extraction_time[:10] if len(extraction_time) >= 10 else extraction_time
-            subtitle += f"Data extracted: {date_part}"
+            subtitle += f"数据采集时间 (Extraction Date): {date_part}"
 
-        txBox = slide.shapes.add_textbox(Inches(0.8), Inches(3.6), Inches(10), Inches(2))
+        txBox = slide.shapes.add_textbox(Inches(0.8), Inches(3.8), Inches(10), Inches(2))
         tf = txBox.text_frame
         tf.word_wrap = True
         for i, line in enumerate(subtitle.split("\n")):
-            if i == 0:
-                p = tf.paragraphs[0]
-            else:
-                p = tf.add_paragraph()
+            p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
             p.text = line
             p.font.size = Pt(16)
             p.font.color.rgb = RGBColor(0xAA, 0xBB, 0xCC)
-            p.font.name = FONT_EN
+            p.font.name = FONT_ZH
             p.space_after = Pt(4)
 
-    def _build_executive_summary(self, page_num: int):
-        """Build Executive Summary slide."""
+    def _build_overview(self, page_num: int):
+        """第一章：数据概览。"""
         slide = self._add_blank_slide()
-        self._add_title_bar(slide, "Chapter 1: Executive Summary", page_num)
-
-        summary = self.summary
-
-        # Key findings
-        key_findings = summary.get("key_findings", [
-            "Analysis pending - run with actual data for findings.",
-        ])
-
-        self._add_text_box(slide, Inches(0.5), Inches(1.1), Inches(6), Inches(0.5),
-                           "Key Findings", font_size=18, bold=True, color=DARK_BLUE)
-        self._add_bullet_list(slide, Inches(0.5), Inches(1.7), Inches(6), Inches(3),
-                              key_findings[:5], font_size=13)
-
-        # Satisfaction distribution pie chart
-        sat_dist = summary.get("satisfaction_distribution", {})
-        if sat_dist:
-            labels = [f"Score {i}" for i in range(1, 6)]
-            values = [sat_dist.get(str(i), 0) for i in range(1, 6)]
-            fig = self._make_pie_chart(labels, values,
-                                       title="Overall Satisfaction Distribution",
-                                       colors=SATISFACTION_COLORS, figsize=(4.5, 4.5))
-            self._add_chart_image(slide, fig, Inches(7), Inches(1.2), Inches(5.5), Inches(5.5))
-
-        # Top issues and top positives
-        top_issues = summary.get("top_issues", [])
-        top_positives = summary.get("top_positives", [])
-
-        if top_issues:
-            self._add_text_box(slide, Inches(0.5), Inches(4.5), Inches(5.5), Inches(0.4),
-                               "Top 3 Issues", font_size=15, bold=True, color=ACCENT_RED)
-            issue_items = [f"{item['name']} ({item['count']} posts)" for item in top_issues[:3]]
-            self._add_bullet_list(slide, Inches(0.5), Inches(5.0), Inches(5.5), Inches(2),
-                                  issue_items, font_size=12, color=TEXT_DARK)
-
-    def _build_executive_summary_2(self, page_num: int):
-        """Build second Executive Summary slide if needed."""
-        slide = self._add_blank_slide()
-        self._add_title_bar(slide, "Chapter 1: Executive Summary (cont.)", page_num)
-
-        summary = self.summary
-        top_positives = summary.get("top_positives", [])
-        avg_satisfaction = summary.get("avg_satisfaction", 0)
-
-        # Sentiment distribution pie
-        sent_dist = summary.get("sentiment_distribution", {})
-        if sent_dist:
-            labels = list(sent_dist.keys())
-            values = list(sent_dist.values())
-            colors = [SENTIMENT_COLORS.get(l, MPL_GRAY) for l in labels]
-            fig = self._make_pie_chart(labels, values,
-                                       title="Sentiment Distribution",
-                                       colors=colors, figsize=(4.5, 4.5))
-            self._add_chart_image(slide, fig, Inches(0.5), Inches(1.2), Inches(5.5), Inches(5.5))
-
-        # Top positives
-        if top_positives:
-            self._add_text_box(slide, Inches(7), Inches(1.1), Inches(5.5), Inches(0.4),
-                               "Top 3 Most Appreciated Aspects", font_size=15, bold=True,
-                               color=ACCENT_GREEN)
-            pos_items = [f"{item['name']} ({item['count']} posts)" for item in top_positives[:3]]
-            self._add_bullet_list(slide, Inches(7), Inches(1.7), Inches(5.5), Inches(2),
-                                  pos_items, font_size=12)
-
-        # Average satisfaction score
-        self._add_text_box(slide, Inches(7), Inches(3.5), Inches(5), Inches(0.4),
-                           f"Average Satisfaction Score: {avg_satisfaction:.1f} / 5.0",
-                           font_size=16, bold=True, color=DARK_BLUE)
-
-    def _build_data_overview(self, page_num: int):
-        """Build Data Overview slides."""
-        slide = self._add_blank_slide()
-        self._add_title_bar(slide, "Chapter 2: Data Overview", page_num)
+        self._add_title_bar(slide, "第一章：数据概览 (Data Overview)", page_num)
 
         stats = self.summary.get("basic_stats", {})
-        total_posts = stats.get("total_posts", 0)
-        total_comments = stats.get("total_comments", 0)
-        unique_authors = stats.get("unique_authors", 0)
-        avg_reactions = stats.get("avg_reactions", 0)
-        avg_comments = stats.get("avg_comment_count", 0)
-        posts_with_images = stats.get("posts_with_images", 0)
-        posts_with_videos = stats.get("posts_with_videos", 0)
-        posts_text_only = stats.get("posts_text_only", 0)
-
-        # Stats cards
         cards = [
-            ("Total Posts", str(total_posts)),
-            ("Total Comments", str(total_comments)),
-            ("Unique Authors", str(unique_authors)),
-            ("Avg Reactions/Post", f"{avg_reactions:.1f}"),
-            ("Avg Comments/Post", f"{avg_comments:.1f}"),
+            ("帖子总数\n(Total Posts)", str(stats.get("total_posts", 0))),
+            ("评论总数\n(Total Comments)", str(stats.get("total_comments", 0))),
+            ("独立作者数\n(Unique Authors)", str(stats.get("unique_authors", 0))),
+            ("平均反应数\n(Avg Reactions)", f"{stats.get('avg_reactions', 0):.1f}"),
+            ("平均评论数\n(Avg Comments)", f"{stats.get('avg_comment_count', 0):.1f}"),
         ]
 
         for i, (label, value) in enumerate(cards):
@@ -442,407 +348,387 @@ class ReportGenerator:
             left = Inches(0.5 + col * 2.5)
             top = Inches(1.3)
 
-            # Card background
-            card = slide.shapes.add_shape(1, left, top, Inches(2.2), Inches(1.3))
+            card = slide.shapes.add_shape(1, left, top, Inches(2.2), Inches(1.5))
             card.fill.solid()
             card.fill.fore_color.rgb = RGBColor(0xEC, 0xF0, 0xF1)
             card.line.fill.background()
 
-            # Value
-            self._add_text_box(slide, left + Inches(0.15), top + Inches(0.1),
-                               Inches(1.9), Inches(0.7),
+            self._add_text_box(slide, left + Inches(0.1), top + Inches(0.1),
+                               Inches(2.0), Inches(0.7),
                                value, font_size=28, bold=True, color=DARK_BLUE,
-                               alignment=PP_ALIGN.CENTER)
-            # Label
-            self._add_text_box(slide, left + Inches(0.15), top + Inches(0.75),
-                               Inches(1.9), Inches(0.4),
-                               label, font_size=11, color=TEXT_LIGHT,
+                               alignment=PP_ALIGN.CENTER, font_name=FONT_EN)
+            self._add_text_box(slide, left + Inches(0.1), top + Inches(0.8),
+                               Inches(2.0), Inches(0.6),
+                               label, font_size=10, color=TEXT_LIGHT,
                                alignment=PP_ALIGN.CENTER)
 
-        # Post type distribution pie
-        type_labels = ["Text Only", "With Images", "With Videos"]
-        type_values = [posts_text_only, posts_with_images, posts_with_videos]
+        # 帖子类型饼图
+        type_labels = ["纯文本 (Text Only)", "含图片 (With Images)", "含视频 (With Videos)"]
+        type_values = [
+            stats.get("posts_text_only", 0),
+            stats.get("posts_with_images", 0),
+            stats.get("posts_with_videos", 0),
+        ]
         fig = self._make_pie_chart(type_labels, type_values,
-                                   title="Post Type Distribution",
+                                   title="帖子类型分布 (Post Type Distribution)",
                                    colors=[MPL_GRAY, MPL_LIGHT_BLUE, MPL_ORANGE],
                                    figsize=(4.5, 4.5))
-        self._add_chart_image(slide, fig, Inches(0.5), Inches(3.0), Inches(5), Inches(4))
+        self._add_chart_image(slide, fig, Inches(0.5), Inches(3.2), Inches(5), Inches(4))
 
-        # Top 10 high-engagement posts
+        # 高互动帖子
         top_posts = self.summary.get("top_engagement_posts", [])
         if top_posts:
-            self._add_text_box(slide, Inches(6), Inches(3.0), Inches(6.5), Inches(0.4),
-                               "Top 10 High-Engagement Posts (by reactions)",
+            self._add_text_box(slide, Inches(6), Inches(3.2), Inches(6.5), Inches(0.4),
+                               "高互动帖子 TOP10 (Top Engagement Posts)",
                                font_size=14, bold=True, color=DARK_BLUE)
 
             items = []
-            for i, tp in enumerate(top_posts[:10]):
-                truncated = tp.get("text", "")[:80]
-                if len(tp.get("text", "")) > 80:
+            for tp in top_posts[:10]:
+                truncated = (tp.get("text", "") or "")[:80]
+                if len(tp.get("text", "") or "") > 80:
                     truncated += "..."
-                items.append(f"[{tp.get('reactions', 0)} reactions] {truncated}")
+                cat = tp.get("primary_category", "")
+                items.append(f"[{tp.get('reactions', 0)}反应] [{cat}] {truncated}")
 
-            self._add_bullet_list(slide, Inches(6), Inches(3.5), Inches(6.8), Inches(3.8),
-                                  items, font_size=10, color=TEXT_DARK)
+            self._add_bullet_list(slide, Inches(6), Inches(3.8), Inches(6.8), Inches(3.5),
+                                  items, font_size=9, color=TEXT_DARK)
 
-    def _build_category_overview(self, page_num: int):
-        """Build top-level category distribution slide."""
+    def _build_primary_classification(self, page_num: int):
+        """第二章：主贴五分类总览。"""
         slide = self._add_blank_slide()
-        self._add_title_bar(slide, "Chapter 3: Issue Classification Overview", page_num)
+        self._add_title_bar(slide, "第二章：主贴分类总览 (Post Classification)", page_num)
 
-        top_dist = self.summary.get("top_category_distribution", {})
-        if top_dist:
-            labels = [f"{code} - {CATEGORY_NAMES.get(code, code)}" for code in top_dist]
-            values = list(top_dist.values())
-            colors = [MPL_RED, MPL_ORANGE, MPL_PURPLE, MPL_TEAL, MPL_GREEN, MPL_GRAY]
+        primary_dist = self.summary.get("primary_distribution", {})
+        total = sum(primary_dist.values())
 
-            fig = self._make_horizontal_bar(labels, values,
-                                            title="Top-Level Category Distribution",
-                                            color=MPL_DARK_BLUE,
-                                            figsize=(9, 4.5))
-            # Color each bar differently
-            ax = fig.axes[0]
-            for bar, c in zip(ax.patches, colors[:len(values)]):
-                bar.set_color(c)
+        # 饼图
+        labels = []
+        values = []
+        colors = []
+        for cat in PRIMARY_CAT_EN:
+            count = primary_dist.get(cat, 0)
+            en_name = PRIMARY_CAT_EN[cat]
+            pct = count / max(total, 1) * 100
+            labels.append(f"{cat}\n({en_name})\n{count}个 ({pct:.1f}%)")
+            values.append(count)
+            colors.append(PRIMARY_CAT_COLORS.get(cat, MPL_GRAY))
 
-            self._add_chart_image(slide, fig, Inches(0.5), Inches(1.2), Inches(8), Inches(5.5))
+        fig = self._make_pie_chart(labels, values,
+                                   title="主贴分类分布 (Post Classification Distribution)",
+                                   colors=colors, figsize=(6, 6))
+        self._add_chart_image(slide, fig, Inches(0.3), Inches(1.1), Inches(6.5), Inches(6))
 
-        # Summary text on the right
-        total_classified = sum(top_dist.values()) if top_dist else 0
-        self._add_text_box(slide, Inches(8.8), Inches(1.5), Inches(4), Inches(0.5),
-                           f"Total Classifications: {total_classified}",
-                           font_size=14, bold=True, color=DARK_BLUE)
-        self._add_text_box(slide, Inches(8.8), Inches(2.1), Inches(4), Inches(1),
-                           "Note: One post can be classified\ninto multiple categories.",
+        # 右侧统计
+        self._add_text_box(slide, Inches(7.2), Inches(1.3), Inches(5.5), Inches(0.4),
+                           "分类统计 (Classification Statistics)",
+                           font_size=16, bold=True, color=DARK_BLUE)
+
+        y = Inches(2.0)
+        for cat in PRIMARY_CAT_EN:
+            count = primary_dist.get(cat, 0)
+            pct = count / max(total, 1) * 100
+            en_name = PRIMARY_CAT_EN[cat]
+
+            marker = slide.shapes.add_shape(1, Inches(7.2), y + Inches(0.05),
+                                            Inches(0.3), Inches(0.3))
+            marker.fill.solid()
+            hex_color = PRIMARY_CAT_COLORS.get(cat, MPL_GRAY).lstrip("#")
+            marker.fill.fore_color.rgb = RGBColor(
+                int(hex_color[:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
+            )
+            marker.line.fill.background()
+
+            self._add_text_box(slide, Inches(7.7), y, Inches(5), Inches(0.4),
+                               f"{cat} ({en_name}): {count} 个帖子 ({pct:.1f}%)",
+                               font_size=12, color=TEXT_DARK)
+            y += Inches(0.45)
+
+        # 分析方法说明
+        self._add_text_box(slide, Inches(7.2), y + Inches(0.3), Inches(5.5), Inches(0.4),
+                           "分析方法 (Methodology)", font_size=14, bold=True, color=DARK_BLUE)
+        method = "LLM 增强分类 (Qwen)" if self.metadata.get("llm_enabled") else "关键词规则分类 (Keyword-based)"
+        self._add_text_box(slide, Inches(7.2), y + Inches(0.8), Inches(5.5), Inches(0.6),
+                           f"分类方法 (Method): {method}\n帖子总数 (Total): {total}",
                            font_size=11, color=TEXT_LIGHT)
 
-    def _build_subcategory_top15(self, page_num: int):
-        """Build Top 15 subcategory issues slide."""
+    def _build_subcategory_analysis(self, slide_title: str, subcategories: dict,
+                                    quotes: list, chart_color: str,
+                                    title_color, page_num: int) -> int:
+        """通用子分类分析页：条形图 + 饼图 + 用户原声。"""
         slide = self._add_blank_slide()
-        self._add_title_bar(slide, "Chapter 3: Top 15 Specific Issues", page_num)
+        self._add_title_bar(slide, slide_title, page_num)
 
-        l2_dist = self.summary.get("l2_category_distribution", {})
-        if l2_dist:
-            # Sort and take top 15
-            sorted_items = sorted(l2_dist.items(), key=lambda x: x[1], reverse=True)[:15]
-            labels = []
-            values = []
-            for code, count in sorted_items:
-                name = L1_NAMES.get(code, code)
-                labels.append(f"{code}: {name}")
-                values.append(count)
-
-            labels.reverse()
-            values.reverse()
-
-            fig = self._make_horizontal_bar(labels, values,
-                                            title="Top 15 Specific Issue Categories",
-                                            color=MPL_ORANGE,
-                                            figsize=(10, 7))
-            self._add_chart_image(slide, fig, Inches(0.5), Inches(1.1), Inches(12), Inches(6))
-
-    def _build_category_detail(self, cat_code: str, cat_name: str, page_num: int):
-        """Build detail slide for a specific top-level category."""
-        slide = self._add_blank_slide()
-        self._add_title_bar(slide, f"Chapter 3: {cat_name} Issues Detail", page_num)
-
-        l1_dist = self.summary.get("l1_category_distribution", {})
-        # Filter to subcategories of this top-level
-        sub_items = {k: v for k, v in l1_dist.items() if k.startswith(cat_code)}
-
-        if sub_items:
-            labels = [f"{code}: {L1_NAMES.get(code, code)}" for code in sub_items]
-            values = list(sub_items.values())
-
-            fig = self._make_horizontal_bar(labels, values,
-                                            title=f"{cat_name} Sub-category Breakdown",
-                                            color=MPL_DARK_BLUE,
-                                            figsize=(7, max(3, len(labels) * 0.6)))
-            self._add_chart_image(slide, fig, Inches(0.3), Inches(1.2), Inches(7), Inches(5.5))
-
-        # Representative posts
-        examples = self.summary.get("category_examples", {}).get(cat_code, [])
-        if examples:
-            self._add_text_box(slide, Inches(7.5), Inches(1.2), Inches(5.5), Inches(0.4),
-                               "Representative Posts:", font_size=14, bold=True, color=DARK_BLUE)
-
-            ex_items = []
-            for ex in examples[:5]:
-                text = ex.get("text", "")[:120]
-                if len(ex.get("text", "")) > 120:
-                    text += "..."
-                author = ex.get("author", "Unknown")
-                reactions = ex.get("reactions", 0)
-                ex_items.append(f'"{text}" — {author} ({reactions} reactions)')
-
-            self._add_bullet_list(slide, Inches(7.5), Inches(1.8), Inches(5.5), Inches(5),
-                                  ex_items, font_size=10, color=TEXT_DARK)
-
-    def _build_common_issues(self, page_num: int):
-        """Build common issues analysis slide."""
-        slide = self._add_blank_slide()
-        self._add_title_bar(slide, "Chapter 3: Common Issues (3+ reporters)", page_num)
-
-        common = self.summary.get("common_issues", [])
-        if common:
-            items = []
-            for issue in common[:15]:
-                items.append(
-                    f"{issue['code']}: {issue['name']} — {issue['count']} posts, "
-                    f"{issue.get('unique_authors', 'N/A')} unique reporters, "
-                    f"avg reactions: {issue.get('avg_reactions', 0):.1f}"
-                )
-            self._add_bullet_list(slide, Inches(0.5), Inches(1.3), Inches(12), Inches(5.5),
-                                  items, font_size=12)
-        else:
+        if not subcategories:
             self._add_text_box(slide, Inches(0.5), Inches(2), Inches(10), Inches(1),
-                               "No common issues found with 3+ unique reporters.",
-                               font_size=14, color=TEXT_LIGHT)
+                               "暂无数据 (No data available)",
+                               font_size=16, color=TEXT_LIGHT)
+            return page_num
 
-    def _build_satisfaction_slides(self, page_num: int):
-        """Build user satisfaction analysis slides."""
+        # 子分类条形图
+        labels = list(subcategories.keys())[:12]
+        values = [subcategories[k]["count"] for k in labels]
+        total = sum(values)
+
+        colors_list = CHART_COLORS[:len(labels)]
+        fig = self._make_horizontal_bar(
+            labels, values,
+            title="子分类分布 (Sub-category Distribution)",
+            colors=colors_list,
+            figsize=(7, max(3, len(labels) * 0.55))
+        )
+        self._add_chart_image(slide, fig, Inches(0.3), Inches(1.1),
+                              Inches(6.5), Inches(5.8))
+
+        # 饼图
+        pie_labels = [f"{l}\n({v})" for l, v in zip(labels[:8], values[:8])]
+        fig2 = self._make_pie_chart(
+            pie_labels, values[:8],
+            title="占比分布 (Proportion)",
+            colors=colors_list[:8], figsize=(4, 4)
+        )
+        self._add_chart_image(slide, fig2, Inches(7), Inches(1.1), Inches(4.5), Inches(4.5))
+
+        # 量化统计
+        self._add_text_box(slide, Inches(7), Inches(5.8), Inches(5.5), Inches(0.4),
+                           f"共 {total} 个帖子, {len(subcategories)} 个子类别",
+                           font_size=11, color=TEXT_LIGHT)
+
+        # 用户原声页
+        return self._build_quotes_page(
+            slide_title.split("(")[0].strip() + " - 用户原声 (User Voices)",
+            subcategories, quotes, title_color, page_num + 1
+        )
+
+    def _build_quotes_page(self, slide_title: str, subcategories: dict,
+                           quotes: list, title_color, page_num: int) -> int:
+        """用户原声展示页。"""
         slide = self._add_blank_slide()
-        self._add_title_bar(slide, "Chapter 4: User Satisfaction Analysis", page_num)
+        self._add_title_bar(slide, slide_title, page_num)
 
-        # Satisfaction score distribution bar chart
-        sat_dist = self.summary.get("satisfaction_distribution", {})
-        if sat_dist:
-            labels = [f"Score {i}" for i in range(1, 6)]
-            values = [sat_dist.get(str(i), 0) for i in range(1, 6)]
+        y = Inches(1.2)
 
-            fig = self._make_bar_chart(labels, values,
-                                       title="Satisfaction Score Distribution (1-5)",
-                                       colors=SATISFACTION_COLORS,
-                                       figsize=(6, 4))
-            self._add_chart_image(slide, fig, Inches(0.3), Inches(1.2), Inches(6), Inches(4.5))
+        # 每个子类别的代表性原声
+        shown = 0
+        for cat_name, cat_data in subcategories.items():
+            if shown >= 4:
+                break
+            cat_quotes = cat_data.get("quotes", [])
+            if not cat_quotes:
+                continue
 
-        # Sentiment pie chart
-        sent_dist = self.summary.get("sentiment_distribution", {})
-        if sent_dist:
-            labels = list(sent_dist.keys())
-            values = list(sent_dist.values())
-            colors = [SENTIMENT_COLORS.get(l, MPL_GRAY) for l in labels]
-            fig = self._make_pie_chart(labels, values,
-                                       title="Sentiment Distribution",
-                                       colors=colors, figsize=(4.5, 4.5))
-            self._add_chart_image(slide, fig, Inches(6.5), Inches(1.2), Inches(5), Inches(5))
+            self._add_text_box(slide, Inches(0.5), y, Inches(12), Inches(0.35),
+                               f"■ {cat_name} ({cat_data['count']} 个帖子)",
+                               font_size=13, bold=True, color=DARK_BLUE)
+            y += Inches(0.4)
 
-    def _build_keyword_analysis(self, page_num: int):
-        """Build positive/negative keyword analysis slide."""
-        slide = self._add_blank_slide()
-        self._add_title_bar(slide, "Chapter 4: Keyword Analysis", page_num)
+            for quote_text in cat_quotes[:2]:
+                if y > Inches(6.5):
+                    break
+                truncated = (quote_text or "")[:250]
+                if len(quote_text or "") > 250:
+                    truncated += "..."
 
-        pos_kw = self.summary.get("positive_keywords", [])
-        neg_kw = self.summary.get("negative_keywords", [])
+                box = slide.shapes.add_shape(1, Inches(0.7), y, Inches(11.8), Inches(0.85))
+                box.fill.solid()
+                box.fill.fore_color.rgb = LIGHT_GRAY
+                box.line.fill.background()
 
-        # Positive keywords
-        self._add_text_box(slide, Inches(0.5), Inches(1.2), Inches(5.5), Inches(0.4),
-                           "Top Positive Keywords", font_size=16, bold=True, color=ACCENT_GREEN)
-        if pos_kw:
-            items = [f"{kw} ({count})" for kw, count in pos_kw[:15]]
-            self._add_bullet_list(slide, Inches(0.5), Inches(1.8), Inches(5.5), Inches(5),
-                                  items, font_size=12, color=TEXT_DARK)
+                self._add_text_box(slide, Inches(0.9), y + Inches(0.05),
+                                   Inches(11.3), Inches(0.7),
+                                   f'"{truncated}"',
+                                   font_size=10, color=TEXT_DARK)
+                y += Inches(0.95)
 
-        # Negative keywords
-        self._add_text_box(slide, Inches(7), Inches(1.2), Inches(5.5), Inches(0.4),
-                           "Top Negative Keywords", font_size=16, bold=True, color=ACCENT_RED)
-        if neg_kw:
-            items = [f"{kw} ({count})" for kw, count in neg_kw[:15]]
-            self._add_bullet_list(slide, Inches(7), Inches(1.8), Inches(5.5), Inches(5),
-                                  items, font_size=12, color=TEXT_DARK)
+            shown += 1
+            y += Inches(0.1)
+
+        # 高互动帖子原声
+        if quotes and y < Inches(5.5):
+            self._add_text_box(slide, Inches(0.5), y, Inches(12), Inches(0.35),
+                               "■ 高互动代表性帖子 (Top Engagement Posts)",
+                               font_size=13, bold=True, color=DARK_BLUE)
+            y += Inches(0.4)
+
+            for q in quotes[:3]:
+                if y > Inches(6.5):
+                    break
+                text = (q.get("text", "") or "")[:200]
+                if len(q.get("text", "") or "") > 200:
+                    text += "..."
+                author = q.get("author", "")
+                reactions = q.get("reactions", 0)
+
+                box = slide.shapes.add_shape(1, Inches(0.7), y, Inches(11.8), Inches(0.85))
+                box.fill.solid()
+                box.fill.fore_color.rgb = LIGHT_GRAY
+                box.line.fill.background()
+
+                self._add_text_box(slide, Inches(0.9), y + Inches(0.05),
+                                   Inches(11.3), Inches(0.5),
+                                   f'"{text}"', font_size=10, color=TEXT_DARK)
+                self._add_text_box(slide, Inches(0.9), y + Inches(0.55),
+                                   Inches(11.3), Inches(0.25),
+                                   f"— {author} | {reactions} 个反应 (reactions)",
+                                   font_size=9, color=TEXT_LIGHT)
+                y += Inches(0.95)
+
+        return page_num
+
+    def _build_positive_analysis(self, page_num: int) -> int:
+        """第三章：正面评价分析。"""
+        subcats = self.summary.get("positive_subcategories", {})
+        quotes = self.summary.get("positive_quotes", [])
+        return self._build_subcategory_analysis(
+            "第三章：正面评价分析 (Positive Reviews Analysis)",
+            subcats, quotes, MPL_GREEN, ACCENT_GREEN, page_num
+        )
+
+    def _build_negative_analysis(self, page_num: int) -> int:
+        """第四章：负面评价分析。"""
+        subcats = self.summary.get("negative_subcategories", {})
+        quotes = self.summary.get("negative_quotes", [])
+        return self._build_subcategory_analysis(
+            "第四章：负面评价分析 (Negative Reviews Analysis)",
+            subcats, quotes, MPL_RED, ACCENT_RED, page_num
+        )
+
+    def _build_issue_analysis(self, page_num: int) -> int:
+        """第五章：问题/求助分析。"""
+        subcats = self.summary.get("issue_subcategories", {})
+        quotes = self.summary.get("issue_quotes", [])
+        return self._build_subcategory_analysis(
+            "第五章：问题/求助分析 (Issues Analysis)",
+            subcats, quotes, MPL_ORANGE, ACCENT_YELLOW, page_num
+        )
 
     def _build_competitor_slide(self, page_num: int):
-        """Build competitor comparison mentions slide."""
+        """第六章：竞品提及分析。"""
         slide = self._add_blank_slide()
-        self._add_title_bar(slide, "Chapter 5: Competitor Mentions", page_num)
+        self._add_title_bar(slide, "第六章：竞品提及分析 (Competitor Mentions)", page_num)
 
         competitors = self.summary.get("competitor_mentions", {})
         if competitors:
             labels = list(competitors.keys())
             values = list(competitors.values())
 
-            fig = self._make_horizontal_bar(labels, values,
-                                            title="Competitor Brand Mentions",
-                                            color=MPL_ORANGE,
-                                            figsize=(7, max(3, len(labels) * 0.6)))
+            fig = self._make_horizontal_bar(
+                labels, values,
+                title="竞品品牌提及次数 (Competitor Brand Mentions)",
+                colors=MPL_ORANGE,
+                figsize=(7, max(3, len(labels) * 0.6))
+            )
             self._add_chart_image(slide, fig, Inches(0.5), Inches(1.2), Inches(7), Inches(5))
 
-        # Comparison dimensions
-        comp_dims = self.summary.get("comparison_dimensions", [])
-        if comp_dims:
-            self._add_text_box(slide, Inches(8), Inches(1.2), Inches(4.5), Inches(0.4),
-                               "Comparison Dimensions:", font_size=14, bold=True, color=DARK_BLUE)
-            self._add_bullet_list(slide, Inches(8), Inches(1.8), Inches(4.5), Inches(4),
-                                  comp_dims, font_size=12)
-
-    def _build_feature_requests(self, page_num: int):
-        """Build feature requests slide."""
-        slide = self._add_blank_slide()
-        self._add_title_bar(slide, "Chapter 6: Feature Requests & Improvement Suggestions", page_num)
-
-        features = self.summary.get("feature_requests", [])
-        if features:
-            labels = [f['name'] for f in features[:10]]
-            values = [f['count'] for f in features[:10]]
-
-            fig = self._make_horizontal_bar(labels, values,
-                                            title="Most Requested Features",
-                                            color=MPL_TEAL,
-                                            figsize=(8, max(3, len(labels) * 0.55)))
-            self._add_chart_image(slide, fig, Inches(0.3), Inches(1.2), Inches(8), Inches(5.5))
-
-        # Feature list on the right
-        if features:
-            self._add_text_box(slide, Inches(8.5), Inches(1.2), Inches(4.5), Inches(0.4),
-                               "Feature Details:", font_size=14, bold=True, color=DARK_BLUE)
-            items = [f"{f['name']}: {f['count']} mentions" for f in features[:10]]
-            self._add_bullet_list(slide, Inches(8.5), Inches(1.8), Inches(4.5), Inches(5),
-                                  items, font_size=11)
-
-    def _build_quotes_slide(self, title: str, quotes: list, page_num: int,
-                            title_color=DARK_BLUE):
-        """Build a slide with user feedback quotes."""
-        slide = self._add_blank_slide()
-        self._add_title_bar(slide, title, page_num)
-
-        if not quotes:
+            self._add_text_box(slide, Inches(8), Inches(1.5), Inches(4.5), Inches(0.4),
+                               "说明 (Notes)", font_size=14, bold=True, color=DARK_BLUE)
+            notes = [
+                "统计范围包含帖子正文及评论 (Posts + Comments)",
+                "每个品牌在每条帖子中仅计一次 (Once per post)",
+                "竞品提及可用于分析用户比较维度",
+            ]
+            self._add_bullet_list(slide, Inches(8), Inches(2.1), Inches(4.5), Inches(3),
+                                  notes, font_size=11)
+        else:
             self._add_text_box(slide, Inches(0.5), Inches(2), Inches(10), Inches(1),
-                               "No representative feedback found.",
-                               font_size=14, color=TEXT_LIGHT)
-            return
+                               "暂无竞品提及数据 (No competitor mention data)",
+                               font_size=16, color=TEXT_LIGHT)
 
-        y = Inches(1.2)
-        for i, quote in enumerate(quotes[:5]):
-            text = quote.get("text", "")[:200]
-            if len(quote.get("text", "")) > 200:
-                text += "..."
-            author = quote.get("author", "Anonymous")
-            reactions = quote.get("reactions", 0)
+    def _build_sentiment_overview(self, page_num: int):
+        """第七章：情感分析总览。"""
+        slide = self._add_blank_slide()
+        self._add_title_bar(slide, "第七章：情感分析总览 (Sentiment Overview)", page_num)
 
-            # Quote box
-            box = slide.shapes.add_shape(1, Inches(0.5), y, Inches(12), Inches(1.1))
-            box.fill.solid()
-            box.fill.fore_color.rgb = LIGHT_GRAY
-            box.line.fill.background()
+        sent_dist = self.summary.get("sentiment_distribution", {})
+        if sent_dist:
+            label_map = {
+                "positive": "正面 (Positive)",
+                "negative": "负面 (Negative)",
+                "neutral": "中性 (Neutral)",
+                "mixed": "混合 (Mixed)",
+            }
+            labels = [label_map.get(k, k) for k in sent_dist]
+            values = list(sent_dist.values())
+            colors = [SENTIMENT_COLORS.get(k, MPL_GRAY) for k in sent_dist]
 
-            self._add_text_box(slide, Inches(0.7), y + Inches(0.05), Inches(11.5), Inches(0.7),
-                               f'"{text}"', font_size=11, color=TEXT_DARK)
-            self._add_text_box(slide, Inches(0.7), y + Inches(0.7), Inches(11.5), Inches(0.3),
-                               f"— {author} | {reactions} reactions",
-                               font_size=10, bold=False, color=TEXT_LIGHT)
+            fig = self._make_pie_chart(labels, values,
+                                       title="情感分布 (Sentiment Distribution)",
+                                       colors=colors, figsize=(5, 5))
+            self._add_chart_image(slide, fig, Inches(0.5), Inches(1.2), Inches(5.5), Inches(5.5))
 
-            y += Inches(1.2)
+        # 分类交叉分析
+        self._add_text_box(slide, Inches(6.5), Inches(1.3), Inches(6), Inches(0.4),
+                           "分类与情感交叉分析 (Cross Analysis)",
+                           font_size=16, bold=True, color=DARK_BLUE)
+
+        primary_dist = self.summary.get("primary_distribution", {})
+        total = sum(primary_dist.values())
+        y = Inches(2.0)
+        for cat in PRIMARY_CAT_EN:
+            count = primary_dist.get(cat, 0)
+            pct = count / max(total, 1) * 100
+            en_name = PRIMARY_CAT_EN[cat]
+            self._add_text_box(slide, Inches(6.5), y, Inches(6), Inches(0.35),
+                               f"{cat} ({en_name}): {count} ({pct:.1f}%)",
+                               font_size=12, color=TEXT_DARK)
+            y += Inches(0.4)
 
     def _build_appendix(self, page_num: int):
-        """Build appendix slide."""
+        """附录：分析方法说明。"""
         slide = self._add_blank_slide()
-        self._add_title_bar(slide, "Appendix: Methodology & Full Statistics", page_num)
+        self._add_title_bar(slide, "附录：分析方法说明 (Appendix: Methodology)", page_num)
 
         method_text = [
-            "Classification Method: Keyword + regex pattern matching",
-            "Each post is analyzed using English and Traditional Chinese keyword dictionaries",
-            "Multi-label classification: a single post can belong to multiple categories",
-            "Sentiment analysis uses a weighted lexicon approach (strong/moderate/mild)",
-            "Satisfaction scored 1-5 based on sentiment intensity and context",
-            "Post weight adjusted by reaction count (higher reactions = higher influence)",
-            "Comments are included in analysis as supporting context for their parent post",
+            "主贴分类 (Primary Classification): 基于关键词规则 + LLM 增强（如启用）进行五分类",
+            "子分类 (Sub-classification): 使用 Qwen LLM 对正面评价、负面评价、问题分别深度分析",
+            "情感分析 (Sentiment Analysis): 加权词典方法（强/中/弱三级），支持中英文",
+            "多标签分类 (Multi-label): 单个帖子可归入多个细粒度类别",
+            "用户原声 (User Voices): 按互动量排序，选取各子类别代表性帖子",
+            "评论纳入 (Comments): 帖子评论作为辅助上下文参与分类",
+            "字体规范 (Fonts): 中文使用等线 (DengXian)，英文使用 Calibri",
         ]
-        self._add_bullet_list(slide, Inches(0.5), Inches(1.3), Inches(12), Inches(3),
+        self._add_bullet_list(slide, Inches(0.5), Inches(1.3), Inches(12), Inches(5),
                               method_text, font_size=12)
 
-        # Full category stats table (simplified as text)
-        l2_dist = self.summary.get("l2_category_distribution", {})
-        if l2_dist:
-            self._add_text_box(slide, Inches(0.5), Inches(4.2), Inches(12), Inches(0.4),
-                               "Full Category Statistics:", font_size=14, bold=True, color=DARK_BLUE)
-
-            sorted_items = sorted(l2_dist.items(), key=lambda x: x[1], reverse=True)
-            col1_items = sorted_items[:len(sorted_items)//2]
-            col2_items = sorted_items[len(sorted_items)//2:]
-
-            if col1_items:
-                items1 = [f"{code}: {L1_NAMES.get(code, code)} = {count}" for code, count in col1_items]
-                self._add_bullet_list(slide, Inches(0.5), Inches(4.7), Inches(6), Inches(2.5),
-                                      items1, font_size=10)
-            if col2_items:
-                items2 = [f"{code}: {L1_NAMES.get(code, code)} = {count}" for code, count in col2_items]
-                self._add_bullet_list(slide, Inches(6.5), Inches(4.7), Inches(6), Inches(2.5),
-                                      items2, font_size=10)
-
-    # ── Main generation method ─────────────────────────────────────
+    # ── 主生成方法 ────────────────────────────────────────────────
 
     def generate(self, output_path: str):
-        """
-        Generate the complete PPTX report.
-
-        Args:
-            output_path: path to save the .pptx file
-        """
+        """生成完整的 PPTX 报告。"""
         page = 1
 
-        # Cover
+        # 封面
         self._build_cover_slide()
 
-        # Chapter 1: Executive Summary
-        self._build_executive_summary(page)
-        page += 1
-        self._build_executive_summary_2(page)
+        # 第一章：数据概览
+        self._build_overview(page)
         page += 1
 
-        # Chapter 2: Data Overview
-        self._build_data_overview(page)
+        # 第二章：主贴五分类
+        self._build_primary_classification(page)
         page += 1
 
-        # Chapter 3: Classification Analysis
-        self._build_category_overview(page)
-        page += 1
-        self._build_subcategory_top15(page)
+        # 第三章：正面评价分析（图表页 + 用户原声页）
+        page = self._build_positive_analysis(page)
         page += 1
 
-        # Category detail slides
-        for cat_code, cat_name in [("H", "Hardware"), ("S", "Software"),
-                                    ("M", "Material"), ("U", "User Experience")]:
-            l1_dist = self.summary.get("l1_category_distribution", {})
-            has_data = any(k.startswith(cat_code) for k in l1_dist)
-            if has_data:
-                self._build_category_detail(cat_code, cat_name, page)
-                page += 1
-
-        self._build_common_issues(page)
+        # 第四章：负面评价分析（图表页 + 用户原声页）
+        page = self._build_negative_analysis(page)
         page += 1
 
-        # Chapter 4: Satisfaction
-        self._build_satisfaction_slides(page)
-        page += 1
-        self._build_keyword_analysis(page)
+        # 第五章：问题/求助分析（图表页 + 用户原声页）
+        page = self._build_issue_analysis(page)
         page += 1
 
-        # Chapter 5: Competitors
+        # 第六章：竞品提及
         self._build_competitor_slide(page)
         page += 1
 
-        # Chapter 6: Feature Requests
-        self._build_feature_requests(page)
+        # 第七章：情感分析
+        self._build_sentiment_overview(page)
         page += 1
 
-        # Chapter 7: Quotes
-        positive_quotes = self.summary.get("positive_quotes", [])
-        negative_quotes = self.summary.get("negative_quotes", [])
-        constructive_quotes = self.summary.get("constructive_quotes", [])
-
-        self._build_quotes_slide("Chapter 7: Most Positive Feedback",
-                                 positive_quotes, page, title_color=ACCENT_GREEN)
-        page += 1
-        self._build_quotes_slide("Chapter 7: Most Negative Feedback",
-                                 negative_quotes, page, title_color=ACCENT_RED)
-        page += 1
-        self._build_quotes_slide("Chapter 7: Most Constructive Feedback",
-                                 constructive_quotes, page)
-        page += 1
-
-        # Appendix
+        # 附录
         self._build_appendix(page)
 
-        # Save
+        # 保存
         self.prs.save(output_path)
-        print(f"Report saved to: {output_path}")
+        print(f"报告已保存: {output_path}")
