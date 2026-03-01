@@ -18,7 +18,7 @@ import matplotlib.font_manager as fm
 import pandas as pd
 from lxml import etree
 from pptx import Presentation
-from pptx.util import Inches, Pt, Emu
+from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
 from pptx.enum.shapes import MSO_SHAPE
@@ -77,6 +77,34 @@ TOPIC_DISPLAY = {
 }
 
 
+# --- 模板布局常量 (Ion Boardroom) ---
+LAYOUT_TITLE = 0       # Title Slide: placeholders [0]=title, [1]=subtitle
+LAYOUT_CONTENT = 1     # Title and Content: [0]=title, [1]=content body
+LAYOUT_SECTION = 2     # Section Header: [0]=title, [1]=description
+LAYOUT_TITLE_ONLY = 5  # Title Only: [0]=title (chart/table below)
+LAYOUT_BLANK = 6       # Blank: no placeholders
+SLIDE_W = 13.333       # Ion Boardroom slide width (inches)
+
+# --- 模板路径 ---
+_TEMPLATE_DIR = Path(__file__).parent / "pptx_templates"
+_TEMPLATE_NAME = "Ion_Boardroom.pptx"
+
+
+def _get_template_path():
+    """查找 SlideDeck AI 模板文件。"""
+    local = _TEMPLATE_DIR / _TEMPLATE_NAME
+    if local.exists():
+        return str(local)
+    try:
+        import slidedeckai
+        pkg = Path(slidedeckai.__file__).parent / "pptx_templates" / _TEMPLATE_NAME
+        if pkg.exists():
+            return str(pkg)
+    except ImportError:
+        pass
+    return None
+
+
 # --- 字体设置 ---
 _NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
 FONT_LATIN = "Calibri"
@@ -101,6 +129,82 @@ def _set_paragraph_font(p, latin=None, ea=None):
         if ea_elem is None:
             ea_elem = etree.SubElement(rPr, f"{{{_NS}}}ea")
         ea_elem.set("typeface", ea)
+
+
+# ============================================================
+# SlideDeck AI 文本格式化工具 (adapted from slidedeckai.helpers.pptx_helper)
+# ============================================================
+
+_BOLD_ITALICS_PATTERN = re.compile(r'(\*\*(.*?)\*\*|\*(.*?)\*)')
+
+
+def _format_text(paragraph, text):
+    """应用 **bold** 和 *italic* markdown 格式化到段落。"""
+    matches = list(_BOLD_ITALICS_PATTERN.finditer(text))
+    last_index = 0
+    for match in matches:
+        start, end = match.span()
+        if start > last_index:
+            run = paragraph.add_run()
+            run.text = text[last_index:start]
+        if match.group(2):
+            run = paragraph.add_run()
+            run.text = match.group(2)
+            run.font.bold = True
+        elif match.group(3):
+            run = paragraph.add_run()
+            run.text = match.group(3)
+            run.font.italic = True
+        last_index = end
+    if last_index < len(text):
+        run = paragraph.add_run()
+        run.text = text[last_index:]
+
+
+def _get_flat_list(items, level=0):
+    """递归展平嵌套列表为 (text, level) 元组列表。"""
+    flat = []
+    for item in items:
+        if isinstance(item, str):
+            flat.append((item, level))
+        elif isinstance(item, list):
+            flat.extend(_get_flat_list(item, level + 1))
+    return flat
+
+
+def _add_bulleted_items(text_frame, flat_items):
+    """向 text_frame 添加分层 bullet points，支持 bold/italic markdown。"""
+    for idx, (text, level) in enumerate(flat_items):
+        if idx == 0:
+            paragraph = text_frame.paragraphs[0]
+        else:
+            paragraph = text_frame.add_paragraph()
+            paragraph.level = level
+        _format_text(paragraph, text)
+
+
+def _markdown_to_bullet_items(text):
+    """将 markdown 文本转为嵌套 bullet items 列表。
+
+    支持：## 标题, ### 子标题, - 列表项, 普通文本
+    返回可被 _get_flat_list() 展平的嵌套列表。
+    """
+    items = []
+    for line in text.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("## "):
+            items.append("**" + line[3:] + "**")
+        elif line.startswith("### "):
+            items.append(["**" + line[4:] + "**"])
+        elif line.startswith("- "):
+            items.append([line[2:]])
+        elif line.startswith("  - "):
+            items.append([[line[4:]]])
+        else:
+            items.append(line)
+    return items
 
 
 # ============================================================
@@ -555,70 +659,32 @@ def _split_text_and_tables(text):
 # ============================================================
 
 def _add_title_slide(prs, title, subtitle=""):
-    """添加标题幻灯片。"""
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    bg = slide.background
-    fill = bg.fill
-    fill.solid()
-    fill.fore_color.rgb = COLOR_PRIMARY
-
-    txBox = slide.shapes.add_textbox(Inches(1), Inches(2), Inches(8), Inches(1))
-    tf = txBox.text_frame
-    p = tf.paragraphs[0]
-    p.text = "Snapmaker U1"
-    p.font.size = Pt(36)
-    p.font.bold = True
-    p.font.color.rgb = COLOR_WHITE
-    p.alignment = PP_ALIGN.CENTER
-    _set_paragraph_font(p)
-
-    txBox = slide.shapes.add_textbox(Inches(1), Inches(3), Inches(8), Inches(1))
-    tf = txBox.text_frame
-    p = tf.paragraphs[0]
-    p.text = title
-    p.font.size = Pt(24)
-    p.font.color.rgb = COLOR_WHITE
-    p.alignment = PP_ALIGN.CENTER
-    _set_paragraph_font(p)
-
-    if subtitle:
-        txBox = slide.shapes.add_textbox(Inches(1), Inches(4.2), Inches(8), Inches(1))
-        tf = txBox.text_frame
-        p = tf.paragraphs[0]
-        p.text = subtitle
-        p.font.size = Pt(14)
-        p.font.color.rgb = RGBColor(0xCC, 0xDD, 0xEE)
-        p.alignment = PP_ALIGN.CENTER
+    """添加标题幻灯片（使用模板 Title Slide 布局）。"""
+    slide = prs.slides.add_slide(prs.slide_layouts[LAYOUT_TITLE])
+    slide.shapes.title.text = title
+    for p in slide.shapes.title.text_frame.paragraphs:
         _set_paragraph_font(p)
-
+    if subtitle and 1 in slide.placeholders:
+        slide.placeholders[1].text = subtitle
+        for p in slide.placeholders[1].text_frame.paragraphs:
+            _set_paragraph_font(p)
     return slide
 
 
 def _add_section_slide(prs, title):
-    """添加章节分隔幻灯片。"""
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    bg = slide.background
-    fill = bg.fill
-    fill.solid()
-    fill.fore_color.rgb = COLOR_ACCENT
-
-    txBox = slide.shapes.add_textbox(Inches(1), Inches(3), Inches(8), Inches(1.5))
-    tf = txBox.text_frame
-    p = tf.paragraphs[0]
-    p.text = title
-    p.font.size = Pt(32)
-    p.font.bold = True
-    p.font.color.rgb = COLOR_WHITE
-    p.alignment = PP_ALIGN.CENTER
-    _set_paragraph_font(p)
+    """添加章节分隔幻灯片（使用模板 Section Header 布局）。"""
+    slide = prs.slides.add_slide(prs.slide_layouts[LAYOUT_SECTION])
+    slide.shapes.title.text = title
+    for p in slide.shapes.title.text_frame.paragraphs:
+        _set_paragraph_font(p)
     return slide
 
 
 def _add_metrics_slide(prs, title, metrics):
-    """添加数据指标卡片幻灯片。"""
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    """添加数据指标卡片幻灯片（适配宽屏模板）。"""
+    slide = prs.slides.add_slide(prs.slide_layouts[LAYOUT_BLANK])
 
-    txBox = slide.shapes.add_textbox(Inches(0.5), Inches(0.3), Inches(9), Inches(0.6))
+    txBox = slide.shapes.add_textbox(Inches(0.8), Inches(0.3), Inches(11.7), Inches(0.6))
     tf = txBox.text_frame
     p = tf.paragraphs[0]
     p.text = title
@@ -628,9 +694,11 @@ def _add_metrics_slide(prs, title, metrics):
     _set_paragraph_font(p)
 
     n = len(metrics)
-    card_width = 8.5 / n
+    usable_w = SLIDE_W - 1.6  # 左右各 0.8" 边距
+    gap = 0.15
+    card_width = (usable_w - gap * (n - 1)) / n
     for i, (label, value) in enumerate(metrics):
-        left = Inches(0.5 + i * card_width + i * 0.1)
+        left = Inches(0.8 + i * (card_width + gap))
         top = Inches(1.5)
         shape = slide.shapes.add_shape(
             MSO_SHAPE.ROUNDED_RECTANGLE,
@@ -663,48 +731,35 @@ def _add_metrics_slide(prs, title, metrics):
 
 
 def _add_chart_slide(prs, title, fig, subtitle=""):
-    """添加图表幻灯片：嵌入 matplotlib 图表为 PNG。"""
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    """添加图表幻灯片（使用模板 Title Only 布局）。"""
+    slide = prs.slides.add_slide(prs.slide_layouts[LAYOUT_TITLE_ONLY])
+    slide.shapes.title.text = title
+    for p in slide.shapes.title.text_frame.paragraphs:
+        _set_paragraph_font(p)
 
-    txBox = slide.shapes.add_textbox(Inches(0.5), Inches(0.3), Inches(9), Inches(0.6))
-    tf = txBox.text_frame
-    p = tf.paragraphs[0]
-    p.text = title
-    p.font.size = Pt(20)
-    p.font.bold = True
-    p.font.color.rgb = COLOR_PRIMARY
-    _set_paragraph_font(p)
-
-    line_shape = slide.shapes.add_shape(
-        MSO_SHAPE.RECTANGLE, Inches(0.5), Inches(0.95),
-        Inches(9), Emu(18000)
-    )
-    line_shape.fill.solid()
-    line_shape.fill.fore_color.rgb = COLOR_ACCENT
-    line_shape.line.fill.background()
-
-    chart_top = Inches(1.1)
+    chart_top = Inches(1.5)
     if subtitle:
-        txBox = slide.shapes.add_textbox(Inches(0.5), Inches(1.05), Inches(9), Inches(0.4))
+        txBox = slide.shapes.add_textbox(
+            Inches(0.8), Inches(1.1), Inches(11.7), Inches(0.4))
         tf = txBox.text_frame
         p = tf.paragraphs[0]
         p.text = subtitle
         p.font.size = Pt(12)
         p.font.color.rgb = COLOR_NEUTRAL
         _set_paragraph_font(p)
-        chart_top = Inches(1.5)
+        chart_top = Inches(1.8)
 
     # 按 fig 原始尺寸计算缩放，确保不超出幻灯片边界
     fig_w, fig_h = fig.get_size_inches()
     image_stream = _fig_to_image_stream(fig)
 
-    max_w, max_h = 8.5, 5.5
+    max_w, max_h = 11.5, 5.5
     if subtitle:
         max_h = 5.0
     scale = min(max_w / fig_w, max_h / fig_h, 1.0)
     target_w = fig_w * scale
     target_h = fig_h * scale
-    left = (10 - target_w) / 2  # 水平居中
+    left = (SLIDE_W - target_w) / 2  # 水平居中
 
     slide.shapes.add_picture(image_stream, Inches(left), chart_top,
                              width=Inches(target_w), height=Inches(target_h))
@@ -712,41 +767,37 @@ def _add_chart_slide(prs, title, fig, subtitle=""):
 
 
 def _add_native_table_slide(prs, title, table_data):
-    """将解析后的 markdown 表格渲染为原生 PPTX 表格。自动分页。"""
+    """将解析后的 markdown 表格渲染为原生 PPTX 表格（适配宽屏模板）。"""
     headers = table_data["headers"]
     all_rows = table_data["rows"]
     n_cols = len(headers)
     max_rows_per_page = 10
     slides = []
+    table_w = SLIDE_W - 0.8  # 左右各 0.4" 边距
 
     for page_start in range(0, len(all_rows), max_rows_per_page):
         page_rows = all_rows[page_start:page_start + max_rows_per_page]
-        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        slide = prs.slides.add_slide(prs.slide_layouts[LAYOUT_TITLE_ONLY])
         slides.append(slide)
 
         total_pages = (len(all_rows) + max_rows_per_page - 1) // max_rows_per_page
         page_num = page_start // max_rows_per_page + 1
         slide_title = title if total_pages == 1 else f"{title}（{page_num}/{total_pages}）"
 
-        txBox = slide.shapes.add_textbox(Inches(0.5), Inches(0.2), Inches(9), Inches(0.5))
-        tf = txBox.text_frame
-        p = tf.paragraphs[0]
-        p.text = slide_title
-        p.font.size = Pt(20)
-        p.font.bold = True
-        p.font.color.rgb = COLOR_PRIMARY
-        _set_paragraph_font(p)
+        slide.shapes.title.text = slide_title
+        for p in slide.shapes.title.text_frame.paragraphs:
+            _set_paragraph_font(p)
 
         n_data = len(page_rows)
         row_height = min(0.5, 6.0 / (n_data + 1))
         table_shape = slide.shapes.add_table(
             n_data + 1, n_cols,
-            Inches(0.3), Inches(0.8),
-            Inches(9.4), Inches(min(6.5, (n_data + 1) * row_height))
+            Inches(0.4), Inches(1.1),
+            Inches(table_w), Inches(min(6.2, (n_data + 1) * row_height))
         )
         table = table_shape.table
 
-        per_col = 9.4 / n_cols
+        per_col = table_w / n_cols
         for j in range(n_cols):
             table.columns[j].width = Inches(per_col)
 
@@ -780,33 +831,20 @@ def _add_native_table_slide(prs, title, table_data):
 
 
 def _render_text_slides(prs, title, text, max_chars=900):
-    """渲染纯文本内容幻灯片（字体 ≥ 12pt）。"""
+    """渲染纯文本内容幻灯片（使用模板 Content 布局 + SlideDeck AI 格式化）。"""
     slides = []
     text = text.strip()
     page = 0
 
     while text:
         page += 1
-        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        slide = prs.slides.add_slide(prs.slide_layouts[LAYOUT_CONTENT])
         slides.append(slide)
 
         page_title = title if page == 1 else f"{title}（续{page}）"
-        txBox = slide.shapes.add_textbox(Inches(0.5), Inches(0.3), Inches(9), Inches(0.6))
-        tf = txBox.text_frame
-        p = tf.paragraphs[0]
-        p.text = page_title
-        p.font.size = Pt(20)
-        p.font.bold = True
-        p.font.color.rgb = COLOR_PRIMARY
-        _set_paragraph_font(p)
-
-        line_shape = slide.shapes.add_shape(
-            MSO_SHAPE.RECTANGLE, Inches(0.5), Inches(0.95),
-            Inches(9), Emu(18000)
-        )
-        line_shape.fill.solid()
-        line_shape.fill.fore_color.rgb = COLOR_ACCENT
-        line_shape.line.fill.background()
+        slide.shapes.title.text = page_title
+        for p in slide.shapes.title.text_frame.paragraphs:
+            _set_paragraph_font(p)
 
         chunk = text[:max_chars]
         text = text[max_chars:]
@@ -822,40 +860,21 @@ def _render_text_slides(prs, title, text, max_chars=900):
                     text = chunk[last_nl:] + text
                     chunk = chunk[:last_nl]
 
-        txBox = slide.shapes.add_textbox(
-            Inches(0.5), Inches(1.1), Inches(9), Inches(6.2)
-        )
-        tf = txBox.text_frame
+        # 使用模板 Content 占位符 + SlideDeck AI 格式化
+        body = slide.placeholders[1]
+        tf = body.text_frame
+        tf.clear()
         tf.word_wrap = True
 
-        for line_text in chunk.split("\n"):
-            p = tf.add_paragraph()
-            line_text = line_text.strip()
+        items = _markdown_to_bullet_items(chunk)
+        flat = _get_flat_list(items, 0)
+        if flat:
+            _add_bulleted_items(tf, flat)
+        else:
+            tf.paragraphs[0].text = chunk
 
-            if line_text.startswith("## "):
-                p.text = line_text[3:]
-                p.font.size = Pt(16)
-                p.font.bold = True
-                p.font.color.rgb = COLOR_PRIMARY
-                p.space_before = Pt(8)
-            elif line_text.startswith("### "):
-                p.text = line_text[4:]
-                p.font.size = Pt(14)
-                p.font.bold = True
-                p.font.color.rgb = COLOR_ACCENT
-                p.space_before = Pt(6)
-            elif line_text.startswith("- "):
-                p.text = "  " + line_text
-                p.font.size = Pt(12)
-                p.font.color.rgb = COLOR_DARK
-            else:
-                p.text = line_text
-                p.font.size = Pt(12)
-                p.font.color.rgb = COLOR_DARK
+        for p in tf.paragraphs:
             _set_paragraph_font(p)
-
-        if tf.paragraphs[0].text == "":
-            tf.paragraphs[0]._p.getparent().remove(tf.paragraphs[0]._p)
 
     return slides
 
@@ -877,38 +896,34 @@ def _add_content_slide(prs, title, body_text, max_chars=900):
 
 
 def _add_video_table_slide(prs, videos, llm_results):
-    """添加视频索引表格幻灯片（12pt 字体 + 交替行色）。"""
+    """添加视频索引表格幻灯片（适配宽屏模板）。"""
     page_size = 8
+    table_w = SLIDE_W - 0.8  # 左右各 0.4" 边距
     for page_start in range(0, len(videos), page_size):
         page_videos = videos[page_start:page_start + page_size]
-        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        slide = prs.slides.add_slide(prs.slide_layouts[LAYOUT_TITLE_ONLY])
 
         page_num = page_start // page_size + 1
         total_pages = (len(videos) + page_size - 1) // page_size
         title = f"视频索引（{page_num}/{total_pages}）"
 
-        txBox = slide.shapes.add_textbox(Inches(0.3), Inches(0.2), Inches(9), Inches(0.5))
-        tf = txBox.text_frame
-        p = tf.paragraphs[0]
-        p.text = title
-        p.font.size = Pt(16)
-        p.font.bold = True
-        p.font.color.rgb = COLOR_PRIMARY
-        _set_paragraph_font(p)
+        slide.shapes.title.text = title
+        for p in slide.shapes.title.text_frame.paragraphs:
+            _set_paragraph_font(p)
 
         rows = len(page_videos) + 1
         cols = 5
         table = slide.shapes.add_table(
             rows, cols,
-            Inches(0.3), Inches(0.8),
-            Inches(9.4), Inches(min(6.5, rows * 0.6))
+            Inches(0.4), Inches(1.1),
+            Inches(table_w), Inches(min(6.2, rows * 0.6))
         ).table
 
-        table.columns[0].width = Inches(0.4)
-        table.columns[1].width = Inches(2.2)
-        table.columns[2].width = Inches(3.8)
-        table.columns[3].width = Inches(1.2)
-        table.columns[4].width = Inches(1.8)
+        table.columns[0].width = Inches(0.5)
+        table.columns[1].width = Inches(2.8)
+        table.columns[2].width = Inches(5.5)
+        table.columns[3].width = Inches(1.8)
+        table.columns[4].width = Inches(1.9)
 
         headers = ["#", "频道", "标题", "观看量", "赞助状态"]
         for j, header in enumerate(headers):
@@ -932,8 +947,8 @@ def _add_video_table_slide(prs, videos, llm_results):
             }
             row_data = [
                 str(idx),
-                v["channel"][:20],
-                v["title"][:45],
+                v["channel"][:25],
+                v["title"][:60],
                 f"{v['view_count']:,}",
                 sp_map.get(sp_type, sp_type),
             ]
@@ -988,9 +1003,15 @@ def generate_pptx_report(
         output_path: PPTX 输出路径
     """
     output_path = Path(output_path)
-    prs = Presentation()
-    prs.slide_width = Inches(10)
-    prs.slide_height = Inches(7.5)
+    template_path = _get_template_path()
+    if template_path:
+        prs = Presentation(template_path)
+        logger.info(f"  使用 SlideDeck AI 模板: {template_path}")
+    else:
+        prs = Presentation()
+        prs.slide_width = Inches(SLIDE_W)
+        prs.slide_height = Inches(7.5)
+        logger.warning("  未找到模板文件，使用空白演示文稿")
 
     _setup_chinese_font()
 
