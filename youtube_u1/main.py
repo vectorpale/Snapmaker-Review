@@ -126,13 +126,13 @@ def main():
     llm = init_llm_client(llm_api_key)
 
     # LLM 连通性预检（快速验证 API Key + Base URL + 模型）
-    from config import LLM_BASE_URL, LLM_MODEL
-    logger.info(f"LLM 预检: {LLM_BASE_URL} / {LLM_MODEL}")
+    from config import LLM_BASE_URL, LLM_MODEL_DEEP, LLM_MODEL_FAST
+    logger.info(f"LLM 预检: {LLM_BASE_URL} / deep={LLM_MODEL_DEEP}, fast={LLM_MODEL_FAST}")
     ok, err = preflight_check_llm(llm)
     if not ok:
         logger.error(f"LLM 预检失败: {err}")
         logger.error(
-            "请检查 .env 中的 LLM_API_KEY、LLM_BASE_URL、LLM_MODEL 配置。"
+            "请检查 .env 中的 LLM_API_KEY、LLM_BASE_URL 配置。"
         )
         sys.exit(1)
     logger.info("LLM 预检通过")

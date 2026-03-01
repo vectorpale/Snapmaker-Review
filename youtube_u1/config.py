@@ -265,7 +265,8 @@ LLM_BASE_URL = os.environ.get(
     "LLM_BASE_URL",
     "https://dashscope.aliyuncs.com/compatible-mode/v1",
 )
-LLM_MODEL = os.environ.get("LLM_MODEL", "qwen3.5-plus")
+LLM_MODEL_DEEP = os.environ.get("LLM_MODEL_DEEP", "qwen3.5-plus")    # 字幕分析（需要深度推理）
+LLM_MODEL_FAST = os.environ.get("LLM_MODEL_FAST", "qwen-plus")       # 评论分析、综合报告（结构化提取）
 LLM_MAX_TOKENS = 4096
 LLM_TEMPERATURE = 0.3
 LLM_RATE_LIMIT_DELAY = 1.5        # 每次调用间隔（秒）

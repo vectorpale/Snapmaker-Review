@@ -13,7 +13,8 @@ from openai import OpenAI
 
 from config import (
     LLM_BASE_URL,
-    LLM_MODEL,
+    LLM_MODEL_DEEP,
+    LLM_MODEL_FAST,
     LLM_MAX_TOKENS,
     LLM_TEMPERATURE,
     LLM_RATE_LIMIT_DELAY,
@@ -33,7 +34,7 @@ def init_llm_client(api_key):
     阿里云 DashScope 是国内服务，不需要代理。
     显式传入 http_client 禁用代理，避免环境变量中的 HTTPS_PROXY 干扰。
     """
-    http_client = httpx.Client(proxy=None, timeout=1800.0)
+    http_client = httpx.Client(proxy=None, timeout=600.0)
     return OpenAI(api_key=api_key, base_url=LLM_BASE_URL, http_client=http_client)
 
 
@@ -50,7 +51,7 @@ def preflight_check_llm(client):
     """
     try:
         response = client.chat.completions.create(
-            model=LLM_MODEL,
+            model=LLM_MODEL_FAST,
             max_tokens=1,
             messages=[{"role": "user", "content": "hi"}],
         )
@@ -60,7 +61,7 @@ def preflight_check_llm(client):
         return False, str(e)
 
 
-def _call_llm(client, prompt, max_tokens=None):
+def _call_llm(client, prompt, max_tokens=None, model=None):
     """
     调用 LLM，带指数退避重试。
 
@@ -68,12 +69,14 @@ def _call_llm(client, prompt, max_tokens=None):
     """
     if max_tokens is None:
         max_tokens = LLM_MAX_TOKENS
+    if model is None:
+        model = LLM_MODEL_DEEP
 
     last_error = None
     for attempt in range(LLM_MAX_RETRIES + 1):
         try:
             response = client.chat.completions.create(
-                model=LLM_MODEL,
+                model=model,
                 max_tokens=max_tokens,
                 temperature=LLM_TEMPERATURE,
                 messages=[{"role": "user", "content": prompt}],
@@ -126,11 +129,11 @@ def analyze_transcript_with_llm(client, video, transcript_text):
         prompt += "\n\n[注意：字幕文本过长，已截断至前部分]"
 
     logger.info(
-        f"  调用 LLM ({LLM_MODEL}) 分析字幕 "
+        f"  调用 LLM ({LLM_MODEL_DEEP}) 分析字幕 "
         f"({len(transcript_text):,} chars)..."
     )
 
-    result = _call_llm(client, prompt)
+    result = _call_llm(client, prompt, model=LLM_MODEL_DEEP)
     if result:
         return {"status": "success", "analysis_text": result, "error": None}
     return {
@@ -184,11 +187,11 @@ def analyze_comments_with_llm(client, video, comments_df):
     )
 
     logger.info(
-        f"  调用 LLM ({LLM_MODEL}) 分析评论 "
+        f"  调用 LLM ({LLM_MODEL_FAST}) 分析评论 "
         f"({len(comments_df)} 条, {len(comments_text):,} chars)..."
     )
 
-    result = _call_llm(client, prompt)
+    result = _call_llm(client, prompt, model=LLM_MODEL_FAST)
     if result:
         return {
             "status": "success",
@@ -261,11 +264,11 @@ def generate_overall_with_llm(client, llm_results, videos):
     )
 
     logger.info(
-        f"调用 LLM ({LLM_MODEL}) 生成综合报告 "
+        f"调用 LLM ({LLM_MODEL_FAST}) 生成综合报告 "
         f"(prompt: {len(prompt):,} chars)..."
     )
 
-    result = _call_llm(client, prompt, max_tokens=16384)
+    result = _call_llm(client, prompt, max_tokens=16384, model=LLM_MODEL_FAST)
     if result:
         return {"status": "success", "analysis_text": result, "error": None}
     return {
