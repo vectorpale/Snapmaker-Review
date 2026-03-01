@@ -3,6 +3,10 @@ LLM client for Qwen API integration.
 
 Uses the OpenAI-compatible DashScope endpoint to call Qwen models
 for post classification and sub-category analysis.
+
+分类体系：双维度
+  维度一 — 内容类型 (MECE): 问题/求助、评价/反馈、产品展示、其他
+  维度二 — 情感倾向: 正面、负面、中性
 """
 
 import json
@@ -17,23 +21,30 @@ except ImportError:
 
 # ── Prompt templates ─────────────────────────────────────────────
 
-PRIMARY_CLASSIFY_PROMPT = """你是一个专业的用户反馈分析师。请对以下来自 Snapmaker U1 3D打印机 Facebook 用户群的帖子进行分类。
+PRIMARY_CLASSIFY_PROMPT = """你是一个专业的用户反馈分析师。请对以下来自 Snapmaker U1 3D打印机 Facebook 用户群的帖子进行**双维度分类**。
 
-【重要】分类必须遵循 MECE 原则（互斥且完全穷尽）：每个帖子有且仅归入以下5个类别中的1个：
-1. 问题/求助 — 用户遇到了具体问题需要帮助，核心目的是寻求解决方案（如报告故障、提问技术问题）
-2. 打印结果展示/晒作品 — 以展示3D打印成品照片/视频为主要内容（show & tell）
-3. 正面反馈 — 对产品、服务或体验表达正面评价和赞赏（不含纯作品展示）
-4. 负面反馈 — 对产品、服务或体验表达不满、抱怨或批评（重点是情绪表达，而非寻求技术帮助）
-5. 其他内容 — 无法归入以上类别的内容，如纯转发、广告、不相关讨论等
+【维度一：内容类型】（MECE — 互斥且完全穷尽，每帖仅归入1个）
+1. 问题/求助 — 用户遇到了具体问题需要帮助，核心目的是寻求解决方案（如报告故障、提问技术问题、请求指导）
+2. 评价/反馈 — 用户对产品、服务或体验发表评价意见（无论正面还是负面，核心目的是表达观点）
+3. 产品展示 — 以展示3D打印成品照片/视频为主要内容（show & tell、晒作品）
+4. 其他 — 无法归入以上类别的内容（纯转发、广告、不相关讨论、通知等）
 
-【分类边界判定】
-- "问题/求助" vs "负面反馈"：看帖子的核心目的——如果是在求解决方案→问题/求助；如果是在宣泄不满→负面反馈
-- "打印结果展示" vs "正面反馈"：看内容载体——如果以展示打印成品图片为主→打印结果展示；如果以文字评价为主→正面反馈
-- 优先级阶梯（边缘情况）：问题/求助 > 打印结果展示 > 负面反馈 > 正面反馈 > 其他内容
+【维度二：情感倾向】（独立于内容类型，每帖仅归入1个）
+1. 正面 — 帖子整体表达了满意、赞赏、推荐等正面情绪
+2. 负面 — 帖子整体表达了不满、失望、抱怨等负面情绪
+3. 中性 — 无明显情感倾向，或正负混合难以判断
 
-请以JSON格式返回结果，格式为：
+【重要说明】
+- 两个维度独立判断，任意组合都是合理的。例如：
+  - "问题/求助 + 负面" = 带着不满情绪求助
+  - "问题/求助 + 中性" = 平静地提问
+  - "评价/反馈 + 正面" = 表达好评
+  - "产品展示 + 正面" = 兴奋地晒作品
+
+请以JSON格式返回结果：
 {
-  "category": "问题/求助" 或 "打印结果展示/晒作品" 或 "正面反馈" 或 "负面反馈" 或 "其他内容",
+  "content_type": "问题/求助" 或 "评价/反馈" 或 "产品展示" 或 "其他",
+  "sentiment": "正面" 或 "负面" 或 "中性",
   "confidence": 0.0-1.0,
   "brief_reason": "简短分类理由"
 }
@@ -41,11 +52,11 @@ PRIMARY_CLASSIFY_PROMPT = """你是一个专业的用户反馈分析师。请对
 帖子内容：
 """
 
-POSITIVE_SUBCATEGORY_PROMPT = """你是一个专业的用户反馈分析师。以下是来自 Snapmaker U1 3D打印机用户群的正面反馈帖子。
+POSITIVE_SUBCATEGORY_PROMPT = """你是一个专业的用户反馈分析师。以下是来自 Snapmaker U1 3D打印机用户群的**情感倾向为正面**的帖子。
 
 【重要】一个帖子可能涉及多个正面维度，请选出1-3个最相关的子类别（允许多选）。
 
-正面反馈子类别（编号 + 名称 + 定义）：
+以下子类别为参考框架（编号 + 名称 + 定义）：
 P-01 打印质量好 (Print Quality) — 打印精度高、表面光滑、细节清晰、尺寸准确
 P-02 多色打印效果好 (Multi-color Printing) — 多色/多材料打印的颜色过渡自然、对齐精准、整体效果惊艳
 P-03 换色效率高 (Efficient Color Change) — 工具头切换速度快、换色过程耗材浪费少
@@ -58,6 +69,11 @@ P-09 打印速度快 (Fast Printing Speed) — 打印速度令人满意、效率
 P-10 社区/生态好 (Great Community / Ecosystem) — 用户社区活跃、资源丰富、互助氛围好
 P-11 其他正面 (Other Positive) — 以上类别无法覆盖的正面评价
 
+【自适应调整】以上子类别为参考框架。你可以根据实际帖子内容灵活调整：
+- 如果大量帖子涉及参考框架未覆盖的正面维度，可以创建新的描述性类别
+- 如果某些类别边界模糊难以区分，可以合并
+- 保持子类别总数在8-15个范围内
+
 对每个帖子，返回JSON格式：
 {
   "subcategories": ["P-01 打印质量好", "P-02 多色打印效果好"],
@@ -65,16 +81,16 @@ P-11 其他正面 (Other Positive) — 以上类别无法覆盖的正面评价
   "summary": "一句话中文总结"
 }
 
-注意：subcategories 为数组，选1-3个最相关的子类别，使用"编号 名称"格式（如"P-01 打印质量好"）。
+注意：subcategories 为数组，选1-3个最相关的子类别。可使用参考编号+名称，也可自定义新类别名称。
 
 帖子列表（JSON数组）：
 """
 
-NEGATIVE_SUBCATEGORY_PROMPT = """你是一个专业的用户反馈分析师。以下是来自 Snapmaker U1 3D打印机用户群的负面反馈帖子。
+NEGATIVE_SUBCATEGORY_PROMPT = """你是一个专业的用户反馈分析师。以下是来自 Snapmaker U1 3D打印机用户群的**情感倾向为负面**的帖子。
 
 【重要】一个帖子可能涉及多个负面维度，请选出1-3个最相关的子类别（允许多选）。
 
-负面反馈子类别（编号 + 名称 + 定义）：
+以下子类别为参考框架（编号 + 名称 + 定义）：
 N-01 硬件质量/做工差 (Hardware Quality Issues) — 机械部件、外壳、导轨等静态质量缺陷（收到时即存在的问题）
 N-02 软件/固件问题 (Software / Firmware Issues) — 切片软件BUG、固件更新失败、APP崩溃等软件层面问题
 N-03 打印质量不佳 (Poor Print Quality) — 拉丝、层偏移、表面粗糙、翘曲等打印成品缺陷
@@ -88,6 +104,11 @@ N-10 性价比低 (Poor Value) — 功能与价格不匹配、觉得不值
 N-11 工具头/换头问题 (Toolhead / Tool Change Issues) — 工具头拾取失败、换头过程故障、碰撞等
 N-12 其他负面 (Other Negative) — 以上类别无法覆盖的负面评价
 
+【自适应调整】以上子类别为参考框架。你可以根据实际帖子内容灵活调整：
+- 如果大量帖子涉及参考框架未覆盖的负面维度，可以创建新的描述性类别
+- 如果某些类别边界模糊难以区分，可以合并
+- 保持子类别总数在8-15个范围内
+
 对每个帖子，返回JSON格式：
 {
   "subcategories": ["N-01 硬件质量/做工差", "N-08 稳定性差/频繁故障"],
@@ -95,16 +116,16 @@ N-12 其他负面 (Other Negative) — 以上类别无法覆盖的负面评价
   "summary": "一句话中文总结"
 }
 
-注意：subcategories 为数组，选1-3个最相关的子类别，使用"编号 名称"格式（如"N-01 硬件质量/做工差"）。
+注意：subcategories 为数组，选1-3个最相关的子类别。可使用参考编号+名称，也可自定义新类别名称。
 
 帖子列表（JSON数组）：
 """
 
-ISSUE_SUBCATEGORY_PROMPT = """你是一个专业的用户反馈分析师。以下是来自 Snapmaker U1 3D打印机用户群的问题/求助帖子。
+ISSUE_SUBCATEGORY_PROMPT = """你是一个专业的用户反馈分析师。以下是来自 Snapmaker U1 3D打印机用户群的**内容类型为问题/求助**的帖子。
 
 【重要】子分类必须遵循 MECE 原则：每个帖子只归入1个最主要的子类别。
 
-问题/求助子类别（编号 + 名称 + 定义，MECE，选其一）：
+以下子类别为参考框架（编号 + 名称 + 定义，MECE，选其一）：
 I-01 工具头问题 (Toolhead Issues) — 工具头拾取/停放失败、校准偏移、碰撞、加热异常
 I-02 打印质量问题 (Print Quality Issues) — 拉丝、层偏移、首层附着力差、翘曲、表面缺陷
 I-03 机械结构问题 (Mechanical Issues) — 外壳松脱、导轨磨损、皮带异响、风扇故障
@@ -116,6 +137,11 @@ I-08 购买/配件咨询 (Purchase / Accessories) — 购买建议、配件推�
 I-09 售后支持 (After-sales Support) — 客服响应、保修政策、退换货流程
 I-10 其他问题 (Other Issues) — 以上类别无法覆盖的问题
 
+【自适应调整】以上子类别为参考框架。你可以根据实际帖子内容灵活调整：
+- 如果大量帖子涉及参考框架未覆盖的问题类型，可以创建新的描述性类别
+- 如果某些类别边界模糊难以区分，可以合并
+- 保持子类别总数在8-12个范围内
+
 对每个帖子，返回JSON格式：
 {
   "subcategory": "I-01 工具头问题",
@@ -123,7 +149,7 @@ I-10 其他问题 (Other Issues) — 以上类别无法覆盖的问题
   "summary": "一句话中文总结"
 }
 
-注意：subcategory 为单一字符串，使用"编号 名称"格式（如"I-01 工具头问题"）。
+注意：subcategory 为单一字符串。可使用参考编号+名称，也可自定义新类别名称。
 
 帖子列表（JSON数组）：
 """
@@ -180,7 +206,6 @@ class LLMClient:
         text = text.strip()
         if text.startswith("```"):
             lines = text.split("\n")
-            # Remove first and last lines (```json and ```)
             json_lines = []
             in_block = False
             for line in lines:
@@ -196,7 +221,7 @@ class LLMClient:
         return json.loads(text)
 
     def classify_post(self, post_text: str) -> Dict:
-        """Classify a single post into one of 5 primary categories."""
+        """Classify a single post: content_type + sentiment."""
         prompt = PRIMARY_CLASSIFY_PROMPT + post_text[:2000]
         try:
             result_text = self._call_llm(prompt)
@@ -205,7 +230,8 @@ class LLMClient:
         except (json.JSONDecodeError, Exception) as e:
             print(f"  Warning: Failed to parse LLM classification result: {e}")
             return {
-                "category": "其他内容",
+                "content_type": "其他",
+                "sentiment": "中性",
                 "confidence": 0.1,
                 "brief_reason": "LLM解析失败"
             }
@@ -259,7 +285,7 @@ class LLMClient:
         base_prompt = prompt_map.get(category_type, ISSUE_SUBCATEGORY_PROMPT)
 
         results = []
-        batch_size = 5  # Smaller batches for detailed analysis
+        batch_size = 5
         total = len(posts)
 
         for i in range(0, total, batch_size):

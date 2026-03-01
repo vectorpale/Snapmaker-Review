@@ -1,6 +1,10 @@
 """
 Snapmaker U1 Facebook 用户反馈分析 PPTX 报告生成器
 
+分类体系：双维度
+  维度一 — 内容类型 (MECE): 问题/求助、评价/反馈、产品展示、其他
+  维度二 — 情感倾向: 正面、负面、中性
+
 输出语言：简体中文（用户原文以括号标注英文原文）
 中文字体：等线 (DengXian)
 英文字体：Calibri
@@ -50,28 +54,32 @@ CHART_COLORS = [
     MPL_GRAY, MPL_PINK,
 ]
 
-# 主贴五分类颜色
-PRIMARY_CAT_COLORS = {
+# 内容类型颜色（维度一）
+CONTENT_TYPE_COLORS = {
     "问题/求助": MPL_ORANGE,
-    "打印结果展示/晒作品": MPL_LIGHT_BLUE,
-    "正面反馈": MPL_GREEN,
-    "负面反馈": MPL_RED,
-    "其他内容": MPL_GRAY,
+    "评价/反馈": MPL_LIGHT_BLUE,
+    "产品展示": MPL_TEAL,
+    "其他": MPL_GRAY,
 }
 
-PRIMARY_CAT_EN = {
+CONTENT_TYPE_EN = {
     "问题/求助": "Questions / Help",
-    "打印结果展示/晒作品": "Print Showcase",
-    "正面反馈": "Positive Feedback",
-    "负面反馈": "Negative Feedback",
-    "其他内容": "Other Content",
+    "评价/反馈": "Reviews / Feedback",
+    "产品展示": "Product Showcase",
+    "其他": "Other",
 }
 
-SENTIMENT_COLORS = {
-    "positive": MPL_GREEN,
-    "negative": MPL_RED,
-    "neutral": MPL_GRAY,
-    "mixed": MPL_YELLOW,
+# 情感倾向颜色（维度二）
+SENTIMENT_LABEL_COLORS = {
+    "正面": MPL_GREEN,
+    "负面": MPL_RED,
+    "中性": MPL_GRAY,
+}
+
+SENTIMENT_LABEL_EN = {
+    "正面": "Positive",
+    "负面": "Negative",
+    "中性": "Neutral",
 }
 
 # 字体名称
@@ -90,7 +98,6 @@ def _setup_matplotlib():
         "grid.color": "#CCCCCC",
         "font.size": 11,
     })
-    # 尝试设置支持中文的字体
     for font in ["DengXian", "Microsoft YaHei", "SimHei", "Arial Unicode MS", "DejaVu Sans"]:
         try:
             plt.rcParams["font.sans-serif"] = [font, "Calibri", "DejaVu Sans"]
@@ -283,21 +290,18 @@ class ReportGenerator:
         """封面页。"""
         slide = self._add_blank_slide()
 
-        # 深蓝色背景
         shape = slide.shapes.add_shape(1, Inches(0), Inches(0),
                                        self.prs.slide_width, self.prs.slide_height)
         shape.fill.solid()
         shape.fill.fore_color.rgb = DARK_BLUE
         shape.line.fill.background()
 
-        # 橙色装饰线
         shape2 = slide.shapes.add_shape(1, Inches(0.8), Inches(3.4),
                                         Inches(4), Inches(0.06))
         shape2.fill.solid()
         shape2.fill.fore_color.rgb = ORANGE
         shape2.line.fill.background()
 
-        # 标题
         self._add_text_box(slide, Inches(0.8), Inches(1.0), Inches(11), Inches(1.2),
                            "Snapmaker U1", font_size=44, bold=True, color=WHITE,
                            font_name=FONT_EN)
@@ -305,7 +309,6 @@ class ReportGenerator:
                            "Facebook 用户反馈分析报告",
                            font_size=28, bold=True, color=RGBColor(0xCC, 0xDD, 0xEE))
 
-        # 副标题
         total_posts = self.metadata.get("total_posts", 0)
         total_comments = self.metadata.get("total_comments", 0)
         group_name = self.metadata.get("group_name", "Snapmaker U1 Official Group")
@@ -387,73 +390,78 @@ class ReportGenerator:
                 truncated = (tp.get("text", "") or "")[:80]
                 if len(tp.get("text", "") or "") > 80:
                     truncated += "..."
-                cat = tp.get("primary_category", "")
-                items.append(f"[{tp.get('reactions', 0)}反应] [{cat}] {truncated}")
+                ct = tp.get("content_type", "")
+                st = tp.get("sentiment_label", "")
+                items.append(f"[{tp.get('reactions', 0)}反应] [{ct}|{st}] {truncated}")
 
             self._add_bullet_list(slide, Inches(6), Inches(3.8), Inches(6.8), Inches(3.5),
                                   items, font_size=9, color=TEXT_DARK)
 
-    def _build_primary_classification(self, page_num: int):
-        """第二章：主贴五分类总览。"""
+    def _build_classification_overview(self, page_num: int):
+        """第二章：双维度分类总览（内容类型 × 情感倾向）。"""
         slide = self._add_blank_slide()
-        self._add_title_bar(slide, "第二章：主贴分类总览 (Post Classification)", page_num)
+        self._add_title_bar(slide, "第二章：双维度分类总览 (Two-Dimension Classification)", page_num)
 
-        primary_dist = self.summary.get("primary_distribution", {})
-        total = sum(primary_dist.values())
+        total = self.summary.get("basic_stats", {}).get("total_posts", 0)
 
-        # 饼图
-        labels = []
-        values = []
-        colors = []
-        for cat in PRIMARY_CAT_EN:
-            count = primary_dist.get(cat, 0)
-            en_name = PRIMARY_CAT_EN[cat]
+        # ── 左侧：内容类型饼图 ──
+        ct_dist = self.summary.get("content_type_distribution", {})
+        ct_labels = []
+        ct_values = []
+        ct_colors = []
+        for ct in CONTENT_TYPE_EN:
+            count = ct_dist.get(ct, 0)
+            en_name = CONTENT_TYPE_EN[ct]
             pct = count / max(total, 1) * 100
-            labels.append(f"{cat}\n({en_name})\n{count}个 ({pct:.1f}%)")
-            values.append(count)
-            colors.append(PRIMARY_CAT_COLORS.get(cat, MPL_GRAY))
+            ct_labels.append(f"{ct}\n({en_name})\n{count}个 ({pct:.1f}%)")
+            ct_values.append(count)
+            ct_colors.append(CONTENT_TYPE_COLORS.get(ct, MPL_GRAY))
 
-        fig = self._make_pie_chart(labels, values,
-                                   title="主贴分类分布 (Post Classification Distribution)",
-                                   colors=colors, figsize=(6, 6))
-        self._add_chart_image(slide, fig, Inches(0.3), Inches(1.1), Inches(6.5), Inches(6))
+        fig1 = self._make_pie_chart(ct_labels, ct_values,
+                                    title="内容类型分布 (Content Type)",
+                                    colors=ct_colors, figsize=(5, 5))
+        self._add_chart_image(slide, fig1, Inches(0.3), Inches(1.1), Inches(5.5), Inches(5.2))
 
-        # 右侧统计
-        self._add_text_box(slide, Inches(7.2), Inches(1.3), Inches(5.5), Inches(0.4),
-                           "分类统计 (Classification Statistics)",
-                           font_size=16, bold=True, color=DARK_BLUE)
-
-        y = Inches(2.0)
-        for cat in PRIMARY_CAT_EN:
-            count = primary_dist.get(cat, 0)
+        # ── 右侧：情感倾向饼图 ──
+        st_dist = self.summary.get("sentiment_distribution", {})
+        st_labels = []
+        st_values = []
+        st_colors = []
+        for st in SENTIMENT_LABEL_EN:
+            count = st_dist.get(st, 0)
+            en_name = SENTIMENT_LABEL_EN[st]
             pct = count / max(total, 1) * 100
-            en_name = PRIMARY_CAT_EN[cat]
+            st_labels.append(f"{st}\n({en_name})\n{count}个 ({pct:.1f}%)")
+            st_values.append(count)
+            st_colors.append(SENTIMENT_LABEL_COLORS.get(st, MPL_GRAY))
 
-            marker = slide.shapes.add_shape(1, Inches(7.2), y + Inches(0.05),
-                                            Inches(0.3), Inches(0.3))
-            marker.fill.solid()
-            hex_color = PRIMARY_CAT_COLORS.get(cat, MPL_GRAY).lstrip("#")
-            marker.fill.fore_color.rgb = RGBColor(
-                int(hex_color[:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16)
-            )
-            marker.line.fill.background()
+        fig2 = self._make_pie_chart(st_labels, st_values,
+                                    title="情感倾向分布 (Sentiment)",
+                                    colors=st_colors, figsize=(5, 5))
+        self._add_chart_image(slide, fig2, Inches(6.2), Inches(1.1), Inches(5.5), Inches(5.2))
 
-            self._add_text_box(slide, Inches(7.7), y, Inches(5), Inches(0.4),
-                               f"{cat} ({en_name}): {count} 个帖子 ({pct:.1f}%)",
-                               font_size=12, color=TEXT_DARK)
-            y += Inches(0.45)
+        # ── 底部：交叉分布统计 ──
+        cross_dist = self.summary.get("cross_distribution", {})
+        self._add_text_box(slide, Inches(0.5), Inches(6.4), Inches(12), Inches(0.4),
+                           "交叉分布 (Cross Distribution):",
+                           font_size=11, bold=True, color=DARK_BLUE)
 
-        # 分析方法说明
-        self._add_text_box(slide, Inches(7.2), y + Inches(0.3), Inches(5.5), Inches(0.4),
-                           "分析方法 (Methodology)", font_size=14, bold=True, color=DARK_BLUE)
-        method = "LLM 增强分类 (Qwen)" if self.metadata.get("llm_enabled") else "关键词规则分类 (Keyword-based)"
-        self._add_text_box(slide, Inches(7.2), y + Inches(0.8), Inches(5.5), Inches(0.6),
-                           f"分类方法 (Method): {method}\n帖子总数 (Total): {total}",
-                           font_size=11, color=TEXT_LIGHT)
+        cross_parts = []
+        for ct in CONTENT_TYPE_EN:
+            ct_cross = cross_dist.get(ct, {})
+            parts = [f"{st}{ct_cross.get(st, 0)}" for st in SENTIMENT_LABEL_EN]
+            cross_parts.append(f"{ct}: {' / '.join(parts)}")
+        cross_text = "    |    ".join(cross_parts)
+
+        method = "LLM 增强" if self.metadata.get("llm_enabled") else "关键词规则"
+        self._add_text_box(slide, Inches(0.5), Inches(6.8), Inches(12), Inches(0.4),
+                           f"{cross_text}    |    分类方法: {method}    |    帖子总数: {total}",
+                           font_size=9, color=TEXT_LIGHT)
 
     def _build_subcategory_analysis(self, slide_title: str, subcategories: dict,
                                     quotes: list, chart_color: str,
-                                    title_color, page_num: int) -> int:
+                                    title_color, page_num: int,
+                                    post_count: int = 0) -> int:
         """通用子分类分析页：条形图 + 饼图 + 用户原声。"""
         slide = self._add_blank_slide()
         self._add_title_bar(slide, slide_title, page_num)
@@ -467,7 +475,7 @@ class ReportGenerator:
         # 子分类条形图
         labels = list(subcategories.keys())[:12]
         values = [subcategories[k]["count"] for k in labels]
-        total = sum(values)
+        total_tags = sum(values)
 
         colors_list = CHART_COLORS[:len(labels)]
         fig = self._make_horizontal_bar(
@@ -489,9 +497,11 @@ class ReportGenerator:
         self._add_chart_image(slide, fig2, Inches(7), Inches(1.1), Inches(4.5), Inches(4.5))
 
         # 量化统计
+        stat_text = f"共 {len(subcategories)} 个子类别, {total_tags} 个标签"
+        if post_count > 0:
+            stat_text += f" (来自 {post_count} 个帖子)"
         self._add_text_box(slide, Inches(7), Inches(5.8), Inches(5.5), Inches(0.4),
-                           f"共 {total} 个帖子, {len(subcategories)} 个子类别",
-                           font_size=11, color=TEXT_LIGHT)
+                           stat_text, font_size=11, color=TEXT_LIGHT)
 
         # 用户原声页
         return self._build_quotes_page(
@@ -507,7 +517,6 @@ class ReportGenerator:
 
         y = Inches(1.2)
 
-        # 每个子类别的代表性原声
         shown = 0
         for cat_name, cat_data in subcategories.items():
             if shown >= 4:
@@ -575,30 +584,36 @@ class ReportGenerator:
         return page_num
 
     def _build_positive_analysis(self, page_num: int) -> int:
-        """第三章：正面反馈分析。"""
+        """第三章：正面反馈分析（情感=正面的帖子）。"""
         subcats = self.summary.get("positive_subcategories", {})
         quotes = self.summary.get("positive_quotes", [])
+        count = self.summary.get("positive_count", 0)
         return self._build_subcategory_analysis(
             "第三章：正面反馈分析 (Positive Feedback Analysis)",
-            subcats, quotes, MPL_GREEN, ACCENT_GREEN, page_num
+            subcats, quotes, MPL_GREEN, ACCENT_GREEN, page_num,
+            post_count=count
         )
 
     def _build_negative_analysis(self, page_num: int) -> int:
-        """第四章：负面反馈分析。"""
+        """第四章：负面反馈分析（情感=负面的帖子）。"""
         subcats = self.summary.get("negative_subcategories", {})
         quotes = self.summary.get("negative_quotes", [])
+        count = self.summary.get("negative_count", 0)
         return self._build_subcategory_analysis(
             "第四章：负面反馈分析 (Negative Feedback Analysis)",
-            subcats, quotes, MPL_RED, ACCENT_RED, page_num
+            subcats, quotes, MPL_RED, ACCENT_RED, page_num,
+            post_count=count
         )
 
     def _build_issue_analysis(self, page_num: int) -> int:
-        """第五章：问题/求助分析。"""
+        """第五章：问题/求助分析（内容类型=问题/求助的帖子）。"""
         subcats = self.summary.get("issue_subcategories", {})
         quotes = self.summary.get("issue_quotes", [])
+        count = self.summary.get("issue_count", 0)
         return self._build_subcategory_analysis(
             "第五章：问题/求助分析 (Issues Analysis)",
-            subcats, quotes, MPL_ORANGE, ACCENT_YELLOW, page_num
+            subcats, quotes, MPL_ORANGE, ACCENT_YELLOW, page_num,
+            post_count=count
         )
 
     def _build_competitor_slide(self, page_num: int):
@@ -633,56 +648,18 @@ class ReportGenerator:
                                "暂无竞品提及数据 (No competitor mention data)",
                                font_size=16, color=TEXT_LIGHT)
 
-    def _build_sentiment_overview(self, page_num: int):
-        """第七章：情感分析总览。"""
-        slide = self._add_blank_slide()
-        self._add_title_bar(slide, "第七章：情感分析总览 (Sentiment Overview)", page_num)
-
-        sent_dist = self.summary.get("sentiment_distribution", {})
-        if sent_dist:
-            label_map = {
-                "positive": "正面 (Positive)",
-                "negative": "负面 (Negative)",
-                "neutral": "中性 (Neutral)",
-                "mixed": "混合 (Mixed)",
-            }
-            labels = [label_map.get(k, k) for k in sent_dist]
-            values = list(sent_dist.values())
-            colors = [SENTIMENT_COLORS.get(k, MPL_GRAY) for k in sent_dist]
-
-            fig = self._make_pie_chart(labels, values,
-                                       title="情感分布 (Sentiment Distribution)",
-                                       colors=colors, figsize=(5, 5))
-            self._add_chart_image(slide, fig, Inches(0.5), Inches(1.2), Inches(5.5), Inches(5.5))
-
-        # 分类交叉分析
-        self._add_text_box(slide, Inches(6.5), Inches(1.3), Inches(6), Inches(0.4),
-                           "分类与情感交叉分析 (Cross Analysis)",
-                           font_size=16, bold=True, color=DARK_BLUE)
-
-        primary_dist = self.summary.get("primary_distribution", {})
-        total = sum(primary_dist.values())
-        y = Inches(2.0)
-        for cat in PRIMARY_CAT_EN:
-            count = primary_dist.get(cat, 0)
-            pct = count / max(total, 1) * 100
-            en_name = PRIMARY_CAT_EN[cat]
-            self._add_text_box(slide, Inches(6.5), y, Inches(6), Inches(0.35),
-                               f"{cat} ({en_name}): {count} ({pct:.1f}%)",
-                               font_size=12, color=TEXT_DARK)
-            y += Inches(0.4)
-
     def _build_appendix(self, page_num: int):
         """附录：分析方法说明。"""
         slide = self._add_blank_slide()
         self._add_title_bar(slide, "附录：分析方法说明 (Appendix: Methodology)", page_num)
 
         method_text = [
-            "主贴分类 (Primary Classification): MECE 五分类——问题/求助、打印结果展示、正面反馈、负面反馈、其他内容",
-            "主贴分类方法: 基于关键词规则 + LLM 增强（如启用），每帖仅归入1个类别",
-            "正面/负面子分类 (Positive/Negative Sub-classification): 允许多标签（1-3个），总数可超过帖子数",
-            "问题/求助子分类 (Issue Sub-classification): MECE 单标签，每帖仅归入1个子类别",
-            "情感分析 (Sentiment Analysis): 加权词典方法（强/中/弱三级），支持中英文",
+            "双维度分类体系: 维度一「内容类型」(MECE) × 维度二「情感倾向」独立判断",
+            "内容类型 (Content Type): 问题/求助、评价/反馈、产品展示、其他 — 每帖仅归入1个",
+            "情感倾向 (Sentiment): 正面、负面、中性 — 每帖仅归入1个",
+            "正面/负面子分类: 按情感倾向分组，允许多标签（1-3个），总数可超过帖子数",
+            "问题/求助子分类: 按内容类型分组，MECE 单标签，每帖仅归入1个子类别",
+            "子分类自适应: LLM 可根据实际数据灵活调整参考子类别（合并/新建/重命名）",
             "用户原声 (User Voices): 按互动量排序，选取各子类别代表性帖子（英文原文）",
             "字体规范 (Fonts): 中文使用等线 (DengXian)，英文使用 Calibri",
         ]
@@ -702,8 +679,8 @@ class ReportGenerator:
         self._build_overview(page)
         page += 1
 
-        # 第二章：主贴五分类
-        self._build_primary_classification(page)
+        # 第二章：双维度分类总览（内容类型 × 情感倾向）
+        self._build_classification_overview(page)
         page += 1
 
         # 第三章：正面反馈分析（图表页 + 用户原声页）
@@ -720,10 +697,6 @@ class ReportGenerator:
 
         # 第六章：竞品提及
         self._build_competitor_slide(page)
-        page += 1
-
-        # 第七章：情感分析
-        self._build_sentiment_overview(page)
         page += 1
 
         # 附录

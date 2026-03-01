@@ -12,12 +12,14 @@ Snapmaker U1 Facebook 用户反馈分析工具
     # 禁用 LLM，仅用关键词规则分类
     python analyze.py <input.json> --no-llm
 
-分析流程:
-    1. 主贴五分类: 问题/求助、打印结果展示、正面反馈、负面反馈、其他内容
-    2. 正面反馈子分类及量化统计（允许多标签）
-    3. 负面反馈子分类及量化统计（允许多标签）
-    4. 问题/求助子分类及量化统计（MECE 单标签）
-    5. 生成含饼图/条形图的 PPTX 报告（简体中文）
+分类体系（双维度）:
+    维度一 — 内容类型 (MECE): 问题/求助、评价/反馈、产品展示、其他
+    维度二 — 情感倾向: 正面、负面、中性
+    子分类:
+      - 情感=正面 的帖子 → 正面反馈子分类（多标签）
+      - 情感=负面 的帖子 → 负面反馈子分类（多标签）
+      - 内容类型=问题/求助 的帖子 → 问题子分类（MECE 单标签）
+    生成含饼图/条形图的 PPTX 报告（简体中文）
 """
 
 import argparse
@@ -32,29 +34,41 @@ from classifier import FeedbackClassifier, CATEGORY_NAMES, L1_NAMES, get_l1_from
 from sentiment import SentimentAnalyzer
 
 
-# ── 主贴五分类名称（中英文） ─────────────────────────────────────
+# ── 双维度分类名称 ─────────────────────────────────────────────
 
-PRIMARY_CATEGORIES = {
+CONTENT_TYPES = {
     "问题/求助": "Questions / Help",
-    "打印结果展示/晒作品": "Print Showcase",
-    "正面反馈": "Positive Feedback",
-    "负面反馈": "Negative Feedback",
-    "其他内容": "Other Content",
+    "评价/反馈": "Reviews / Feedback",
+    "产品展示": "Product Showcase",
+    "其他": "Other",
 }
 
-# 用于关键词回退分类的规则映射
-_KEYWORD_PRIMARY_MAP = {
+SENTIMENT_LABELS = {
+    "正面": "Positive",
+    "负面": "Negative",
+    "中性": "Neutral",
+}
+
+# 情感映射：将 sentiment.py 的输出映射到三分类
+_SENTIMENT_MAP = {
+    "positive": "正面",
+    "negative": "负面",
+    "neutral": "中性",
+    "mixed": "中性",  # 混合情感归入中性
+}
+
+# 用于关键词回退分类的规则映射（仅判断内容类型）
+_KEYWORD_CONTENT_TYPE_MAP = {
     "问题/求助": {
         "top_codes": {"H", "S", "M", "U"},
-        "sentiment": {"negative"},
         "keywords": [
             "help", "issue", "problem", "error", "fail", "broken", "not working",
             "how to", "anyone know", "stuck", "trouble", "bug", "crash",
+            "can't", "cannot", "doesn't", "won't", "unable",
             "求助", "问题", "报错", "故障",
         ],
     },
-    "打印结果展示/晒作品": {
-        "top_codes": set(),
+    "产品展示": {
         "l1_codes": {"P6"},
         "keywords": [
             "check this out", "just printed", "first print", "my print",
@@ -64,24 +78,15 @@ _KEYWORD_PRIMARY_MAP = {
             "晒", "成品", "打印了",
         ],
     },
-    "正面反馈": {
+    "评价/反馈": {
         "top_codes": {"P"},
-        "sentiment": {"positive"},
         "keywords": [
             "love", "great", "amazing", "excellent", "fantastic", "awesome",
             "impressed", "happy with", "recommend", "best printer",
-            "worth every penny", "love this printer",
-            "好评", "推荐", "满意",
-        ],
-    },
-    "负面反馈": {
-        "top_codes": set(),
-        "sentiment": {"negative"},
-        "keywords": [
-            "disappointed", "frustrat", "regret", "waste of money",
-            "terrible", "awful", "worst", "horrible", "unacceptable",
-            "returning", "refund", "not worth", "junk",
-            "差评", "失望", "退货",
+            "worth every penny", "disappointed", "frustrat", "regret",
+            "waste of money", "terrible", "awful", "worst", "horrible",
+            "returning", "refund", "not worth",
+            "好评", "推荐", "满意", "差评", "失望",
         ],
     },
 }
@@ -103,62 +108,43 @@ def load_data(filepath: str) -> dict:
     return data
 
 
-def _keyword_primary_classify(post: dict, classification: dict,
-                               sentiment: dict) -> str:
-    """基于关键词和已有分类结果进行主贴五分类（回退方案）。"""
+def _keyword_content_type(post: dict, classification: dict) -> str:
+    """基于关键词和已有分类结果判断内容类型（回退方案）。"""
     text = (post.get("text", "") or "").lower()
     top_cats = set(classification.get("top_categories", []))
     l1_cats = set(classification.get("l1_categories", []))
-    sent_label = sentiment.get("sentiment", "neutral")
 
     scores = Counter()
 
-    for cat_name, rules in _KEYWORD_PRIMARY_MAP.items():
-        # 检查 top_codes 交集
+    for cat_name, rules in _KEYWORD_CONTENT_TYPE_MAP.items():
         if rules.get("top_codes") and top_cats & rules["top_codes"]:
             scores[cat_name] += 2
-
-        # 检查 l1_codes
         if rules.get("l1_codes") and l1_cats & rules["l1_codes"]:
             scores[cat_name] += 3
-
-        # 检查情感匹配
-        if rules.get("sentiment") and sent_label in rules["sentiment"]:
-            scores[cat_name] += 1
-
-        # 关键词匹配
         for kw in rules.get("keywords", []):
             if kw in text:
                 scores[cat_name] += 1.5
 
-    # 展示帖子特征：含图片且正面情感
-    if post.get("has_image") and sent_label in ("positive", "neutral"):
-        scores["打印结果展示/晒作品"] += 1
+    # 展示帖子特征：含图片
+    if post.get("has_image"):
+        scores["产品展示"] += 1
 
     if not scores:
-        return "其他内容"
+        return "其他"
 
-    # 分类优先级调整
-    best_cat = scores.most_common(1)[0][0]
+    return scores.most_common(1)[0][0]
 
-    # 如果同时匹配了 "问题/求助" 和 "负面反馈"，看是在求助还是在抱怨
-    if scores.get("问题/求助", 0) > 0 and scores.get("负面反馈", 0) > 0:
-        # 有明确的求助词汇 → 问题/求助
-        help_words = ["help", "how to", "anyone know", "stuck", "求助"]
-        if any(w in text for w in help_words):
-            best_cat = "问题/求助"
-        # 有强烈的抱怨词汇 → 负面反馈
-        complaint_words = ["disappointed", "frustrat", "regret", "terrible", "returning"]
-        if any(w in text for w in complaint_words):
-            best_cat = "负面反馈"
 
-    return best_cat
+def _map_sentiment_label(sentiment_result: dict) -> str:
+    """将 sentiment.py 输出映射到三分类情感标签。"""
+    raw = sentiment_result.get("sentiment", "neutral")
+    return _SENTIMENT_MAP.get(raw, "中性")
 
 
 def analyze_posts(posts: list, classifier: FeedbackClassifier,
                   sentiment_analyzer: SentimentAnalyzer,
                   llm_client=None) -> list:
-    """对所有帖子进行分析：细粒度分类 + 情感分析 + 主贴五分类。"""
+    """对所有帖子进行分析：细粒度分类 + 情感分析 + 双维度分类。"""
     results = []
     print(f"\n--- 第一阶段：细粒度分类与情感分析 ---")
 
@@ -178,61 +164,72 @@ def analyze_posts(posts: list, classifier: FeedbackClassifier,
 
     print(f"  完成 {len(results)} 个帖子的细粒度分析。")
 
-    # 主贴五分类
-    print(f"\n--- 第二阶段：主贴五分类 ---")
+    # 双维度分类
+    print(f"\n--- 第二阶段：双维度分类（内容类型 × 情感倾向） ---")
     if llm_client:
-        print("  使用 LLM 进行主贴分类...")
+        print("  使用 LLM 进行双维度分类...")
         try:
             llm_results = llm_client.classify_posts_batch(posts)
             for i, result in enumerate(results):
                 if i < len(llm_results):
                     llm_r = llm_results[i]
-                    cat = llm_r.get("category", "其他内容")
-                    if cat in PRIMARY_CATEGORIES:
-                        result["primary_category"] = cat
-                    else:
-                        result["primary_category"] = _keyword_primary_classify(
-                            result, result["classification"], result["sentiment"]
-                        )
-                    result["primary_confidence"] = llm_r.get("confidence", 0.5)
-                    result["primary_reason"] = llm_r.get("brief_reason", "")
-                else:
-                    result["primary_category"] = _keyword_primary_classify(
-                        result, result["classification"], result["sentiment"]
+                    ct = llm_r.get("content_type", "其他")
+                    st = llm_r.get("sentiment", "中性")
+                    result["content_type"] = ct if ct in CONTENT_TYPES else _keyword_content_type(
+                        result, result["classification"]
                     )
-            print(f"  LLM 主贴分类完成。")
+                    result["sentiment_label"] = st if st in SENTIMENT_LABELS else _map_sentiment_label(
+                        result["sentiment"]
+                    )
+                    result["classify_confidence"] = llm_r.get("confidence", 0.5)
+                    result["classify_reason"] = llm_r.get("brief_reason", "")
+                else:
+                    result["content_type"] = _keyword_content_type(
+                        result, result["classification"]
+                    )
+                    result["sentiment_label"] = _map_sentiment_label(result["sentiment"])
+            print(f"  LLM 双维度分类完成。")
         except Exception as e:
             print(f"  LLM 分类失败: {e}，回退到关键词分类...")
             for result in results:
-                result["primary_category"] = _keyword_primary_classify(
-                    result, result["classification"], result["sentiment"]
+                result["content_type"] = _keyword_content_type(
+                    result, result["classification"]
                 )
+                result["sentiment_label"] = _map_sentiment_label(result["sentiment"])
     else:
-        print("  使用关键词规则进行主贴分类（无LLM）...")
+        print("  使用关键词规则 + 情感分析引擎...")
         for result in results:
-            result["primary_category"] = _keyword_primary_classify(
-                result, result["classification"], result["sentiment"]
+            result["content_type"] = _keyword_content_type(
+                result, result["classification"]
             )
+            result["sentiment_label"] = _map_sentiment_label(result["sentiment"])
 
-    # 统计主贴分类分布
-    primary_counter = Counter(r["primary_category"] for r in results)
-    print(f"\n  主贴分类结果:")
-    for cat in PRIMARY_CATEGORIES:
-        count = primary_counter.get(cat, 0)
+    # 统计分布
+    ct_counter = Counter(r["content_type"] for r in results)
+    st_counter = Counter(r["sentiment_label"] for r in results)
+    print(f"\n  内容类型分布:")
+    for ct in CONTENT_TYPES:
+        count = ct_counter.get(ct, 0)
         pct = count / max(len(results), 1) * 100
-        print(f"    {cat}: {count} ({pct:.1f}%)")
+        print(f"    {ct}: {count} ({pct:.1f}%)")
+    print(f"\n  情感倾向分布:")
+    for st in SENTIMENT_LABELS:
+        count = st_counter.get(st, 0)
+        pct = count / max(len(results), 1) * 100
+        print(f"    {st}: {count} ({pct:.1f}%)")
 
     return results
 
 
 def analyze_subcategories_with_llm(analyzed_posts: list, llm_client) -> dict:
-    """使用 LLM 对正面评价、负面评价、问题进行子分类。"""
+    """使用 LLM 进行子分类：按情感分正面/负面，按内容类型分问题。"""
     sub_results = {"positive": [], "negative": [], "issue": []}
 
-    # 按主贴类别分组
-    positive_posts = [p for p in analyzed_posts if p.get("primary_category") == "正面反馈"]
-    negative_posts = [p for p in analyzed_posts if p.get("primary_category") == "负面反馈"]
-    issue_posts = [p for p in analyzed_posts if p.get("primary_category") == "问题/求助"]
+    # 按情感分组（正面/负面）
+    positive_posts = [p for p in analyzed_posts if p.get("sentiment_label") == "正面"]
+    negative_posts = [p for p in analyzed_posts if p.get("sentiment_label") == "负面"]
+    # 按内容类型分组（问题/求助）
+    issue_posts = [p for p in analyzed_posts if p.get("content_type") == "问题/求助"]
 
     if positive_posts:
         print(f"\n  正面反馈子分类 ({len(positive_posts)} 个帖子)...")
@@ -262,7 +259,7 @@ def _aggregate_subcategories(sub_results: List[Dict]) -> Dict[str, Dict]:
     """聚合子分类结果，统计各子类别数量和代表性用户原声。
 
     支持两种格式：
-    - 多标签：subcategories 为数组（正面反馈/负面反馈），总数可超过帖子数
+    - 多标签：subcategories 为数组（正面/负面），总数可超过帖子数
     - 单标签：subcategory 为字符串（问题/求助），总数 = 帖子数
     """
     category_data = defaultdict(lambda: {"count": 0, "quotes": []})
@@ -270,7 +267,6 @@ def _aggregate_subcategories(sub_results: List[Dict]) -> Dict[str, Dict]:
     for item in sub_results:
         quote = item.get("representative_quote", "")
 
-        # 优先使用多标签格式 subcategories（数组）
         subcats = item.get("subcategories")
         if subcats and isinstance(subcats, list):
             for subcat in subcats:
@@ -279,7 +275,6 @@ def _aggregate_subcategories(sub_results: List[Dict]) -> Dict[str, Dict]:
                     if quote and len(category_data[subcat]["quotes"]) < 3:
                         category_data[subcat]["quotes"].append(quote)
         else:
-            # 单标签格式 subcategory（字符串）
             subcat = item.get("subcategory", "未分类")
             if not subcat:
                 subcat = "未分类"
@@ -287,7 +282,6 @@ def _aggregate_subcategories(sub_results: List[Dict]) -> Dict[str, Dict]:
             if quote and len(category_data[subcat]["quotes"]) < 3:
                 category_data[subcat]["quotes"].append(quote)
 
-    # 排序：按数量降序
     sorted_data = dict(
         sorted(category_data.items(), key=lambda x: x[1]["count"], reverse=True)
     )
@@ -323,16 +317,32 @@ def build_summary(analyzed_posts: list, raw_data: dict,
         "posts_text_only": posts_text_only,
     }
 
-    # ── 主贴五分类分布 ──
-    primary_counter = Counter(p.get("primary_category", "其他内容") for p in analyzed_posts)
-    primary_distribution = {}
-    for cat in PRIMARY_CATEGORIES:
-        primary_distribution[cat] = primary_counter.get(cat, 0)
+    # ── 内容类型分布 ──
+    ct_counter = Counter(p.get("content_type", "其他") for p in analyzed_posts)
+    content_type_distribution = {}
+    for ct in CONTENT_TYPES:
+        content_type_distribution[ct] = ct_counter.get(ct, 0)
 
-    # ── 各类别的帖子分组 ──
-    category_groups = defaultdict(list)
-    for post in analyzed_posts:
-        category_groups[post.get("primary_category", "无意义")].append(post)
+    # ── 情感倾向分布 ──
+    st_counter = Counter(p.get("sentiment_label", "中性") for p in analyzed_posts)
+    sentiment_distribution = {}
+    for st in SENTIMENT_LABELS:
+        sentiment_distribution[st] = st_counter.get(st, 0)
+
+    # ── 交叉分布 (content_type × sentiment) ──
+    cross_distribution = {}
+    for ct in CONTENT_TYPES:
+        cross_distribution[ct] = {}
+        ct_posts = [p for p in analyzed_posts if p.get("content_type") == ct]
+        for st in SENTIMENT_LABELS:
+            cross_distribution[ct][st] = sum(
+                1 for p in ct_posts if p.get("sentiment_label") == st
+            )
+
+    # ── 按维度分组 ──
+    positive_posts = [p for p in analyzed_posts if p.get("sentiment_label") == "正面"]
+    negative_posts = [p for p in analyzed_posts if p.get("sentiment_label") == "负面"]
+    issue_posts = [p for p in analyzed_posts if p.get("content_type") == "问题/求助"]
 
     # ── 代表性帖子（按反应数排序） ──
     def _get_top_quotes(posts_list, n=5):
@@ -346,9 +356,9 @@ def build_summary(analyzed_posts: list, raw_data: dict,
             for p in sorted_posts[:n]
         ]
 
-    positive_quotes = _get_top_quotes(category_groups.get("正面反馈", []))
-    negative_quotes = _get_top_quotes(category_groups.get("负面反馈", []))
-    issue_quotes = _get_top_quotes(category_groups.get("问题/求助", []))
+    positive_quotes = _get_top_quotes(positive_posts)
+    negative_quotes = _get_top_quotes(negative_posts)
+    issue_quotes = _get_top_quotes(issue_posts)
 
     # ── LLM 子分类聚合 ──
     positive_subcategories = {}
@@ -363,25 +373,12 @@ def build_summary(analyzed_posts: list, raw_data: dict,
         if llm_subcategories.get("issue"):
             issue_subcategories = _aggregate_subcategories(llm_subcategories["issue"])
     else:
-        # 回退：使用细粒度分类结果聚合
-        positive_subcategories = _fallback_subcategories(
-            category_groups.get("正面反馈", []), "P"
-        )
-        negative_subcategories = _fallback_subcategories(
-            category_groups.get("负面反馈", []), "H,S,M,U"
-        )
-        issue_subcategories = _fallback_subcategories(
-            category_groups.get("问题/求助", []), "H,S,M,U"
-        )
+        positive_subcategories = _fallback_subcategories(positive_posts, "P")
+        negative_subcategories = _fallback_subcategories(negative_posts, "H,S,M,U")
+        issue_subcategories = _fallback_subcategories(issue_posts, "H,S,M,U")
 
     # ── 竞品提及 ──
     competitor_mentions = _extract_competitor_mentions(analyzed_posts)
-
-    # ── 情感分布 ──
-    sentiment_counter = Counter()
-    for post in analyzed_posts:
-        sent = post.get("sentiment", {})
-        sentiment_counter[sent.get("sentiment", "neutral")] += 1
 
     # ── 高互动帖子 ──
     sorted_by_reactions = sorted(analyzed_posts, key=lambda p: p.get("reactions", 0) or 0, reverse=True)
@@ -391,28 +388,33 @@ def build_summary(analyzed_posts: list, raw_data: dict,
             "author": p.get("author", ""),
             "reactions": p.get("reactions", 0),
             "comment_count": p.get("comment_count", 0),
-            "primary_category": p.get("primary_category", ""),
+            "content_type": p.get("content_type", ""),
+            "sentiment_label": p.get("sentiment_label", ""),
         }
         for p in sorted_by_reactions[:10]
     ]
 
     return {
         "basic_stats": basic_stats,
-        "primary_distribution": primary_distribution,
-        "sentiment_distribution": dict(sentiment_counter),
+        "content_type_distribution": content_type_distribution,
+        "sentiment_distribution": sentiment_distribution,
+        "cross_distribution": cross_distribution,
         "positive_subcategories": positive_subcategories,
         "negative_subcategories": negative_subcategories,
         "issue_subcategories": issue_subcategories,
         "positive_quotes": positive_quotes,
         "negative_quotes": negative_quotes,
         "issue_quotes": issue_quotes,
+        "positive_count": len(positive_posts),
+        "negative_count": len(negative_posts),
+        "issue_count": len(issue_posts),
         "competitor_mentions": competitor_mentions,
         "top_engagement_posts": top_engagement,
     }
 
 
 def _fallback_subcategories(posts: list, prefix_filter: str) -> Dict[str, Dict]:
-    """在没有 LLM 的情况下，使用细粒度分类结果作为子分类（MECE：每帖选1个最佳匹配）。"""
+    """在没有 LLM 的情况下，使用细粒度分类结果作为子分类（每帖选1个最佳匹配）。"""
     prefixes = [p.strip() for p in prefix_filter.split(",")]
     category_data = defaultdict(lambda: {"count": 0, "quotes": []})
 
@@ -420,7 +422,6 @@ def _fallback_subcategories(posts: list, prefix_filter: str) -> Dict[str, Dict]:
         cls = post.get("classification", {})
         text = (post.get("text", "") or "")[:200]
 
-        # MECE: 只取置信度最高的一个匹配类别
         best_cat = None
         best_confidence = -1
         for cat in cls.get("categories", []):
@@ -493,12 +494,13 @@ def save_intermediate_json(analyzed_posts: list, summary: dict,
                 "text": (p.get("text", "") or "")[:500],
                 "reactions": p.get("reactions", 0),
                 "comment_count": p.get("comment_count", 0),
-                "primary_category": p.get("primary_category", ""),
+                "content_type": p.get("content_type", ""),
+                "sentiment_label": p.get("sentiment_label", ""),
                 "classification": {
                     "categories": p["classification"]["categories"],
                     "top_categories": p["classification"]["top_categories"],
                 },
-                "sentiment": {
+                "sentiment_detail": {
                     "sentiment": p["sentiment"]["sentiment"],
                     "satisfaction_score": p["sentiment"]["satisfaction_score"],
                 },
