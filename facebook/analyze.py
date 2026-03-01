@@ -3,14 +3,14 @@
 Snapmaker U1 Facebook 用户反馈分析工具
 
 使用方法:
-    # 仅关键词分类（不需要API）
+    # 默认使用 Qwen LLM 分类（需在 .env 中配置 QWEN_API_KEY）
     python analyze.py <input.json>
 
-    # 使用 Qwen LLM 增强分类
-    python analyze.py <input.json> --llm
-
     # 指定输出目录
-    python analyze.py <input.json> --llm --output ./reports/
+    python analyze.py <input.json> --output ./reports/
+
+    # 禁用 LLM，仅用关键词规则分类
+    python analyze.py <input.json> --no-llm
 
 分析流程:
     1. 主贴五分类: 问题/求助、打印结果展示、正面反馈、负面反馈、其他内容
@@ -520,8 +520,8 @@ def main():
     parser.add_argument("input_file", help="Facebook JSON 数据文件路径")
     parser.add_argument("--output", "-o", default=None,
                         help="输出目录 (默认: ./output/)")
-    parser.add_argument("--llm", action="store_true",
-                        help="启用 Qwen LLM 增强分类")
+    parser.add_argument("--no-llm", action="store_true",
+                        help="禁用 LLM，仅使用关键词规则分类")
     parser.add_argument("--api-key", default=None,
                         help="Qwen API Key（也可通过 .env 文件配置）")
 
@@ -557,17 +557,20 @@ def main():
     classifier = FeedbackClassifier()
     sentiment_analyzer = SentimentAnalyzer()
 
-    # 初始化 LLM（可选）
+    # 初始化 LLM（默认启用，--no-llm 关闭）
     llm_client = None
-    if args.llm:
+    if not args.no_llm:
         try:
             from llm_client import LLMClient
             api_key = args.api_key or os.environ.get("QWEN_API_KEY", "")
             llm_client = LLMClient(api_key=api_key)
             print(f"LLM 已启用: {llm_client.model}")
         except Exception as e:
-            print(f"警告: LLM 初始化失败 ({e})，将使用关键词分类。")
+            print(f"警告: LLM 初始化失败 ({e})，将回退到关键词分类。")
+            print(f"  提示: 请在 .env 文件中配置 QWEN_API_KEY，或使用 --api-key 参数。")
             llm_client = None
+    else:
+        print("LLM 已禁用（--no-llm），使用关键词规则分类。")
 
     # 分析帖子
     print(f"\n开始分析 {len(posts)} 个帖子...")

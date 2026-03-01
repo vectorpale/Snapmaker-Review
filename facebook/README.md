@@ -133,7 +133,7 @@ cd facebook/
 pip install -r requirements.txt
 ```
 
-### 2. 配置 LLM（可选）
+### 2. 配置 LLM
 
 复制 `.env.example` 为 `.env` 并填入 Qwen API Key：
 
@@ -152,14 +152,14 @@ QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 ### 3. 运行分析
 
 ```bash
-# 仅关键词分类（无需 API Key）
+# 默认使用 Qwen LLM 分类（需配置 .env）
 python analyze.py facebook_data.json
 
-# 使用 Qwen LLM 增强分类（推荐）
-python analyze.py facebook_data.json --llm
-
 # 指定输出目录
-python analyze.py facebook_data.json --llm --output ./reports/
+python analyze.py facebook_data.json --output ./reports/
+
+# 禁用 LLM，仅用关键词规则分类
+python analyze.py facebook_data.json --no-llm
 ```
 
 ## 输入数据格式

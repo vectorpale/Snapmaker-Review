@@ -49,17 +49,17 @@ Snapmaker-Review/
 
 ### Facebook (`facebook/`)
 
-支持关键词规则 + Qwen LLM 增强的双模式分类，含情感分析和 PPTX 报告生成。
+默认使用 Qwen LLM 分类（需配置 .env），含情感分析和 PPTX 报告生成。
 
 ```bash
 cd facebook/
 pip install -r requirements.txt
 
-# 关键词模式
+# 默认使用 LLM（需配置 .env 中的 QWEN_API_KEY）
 python analyze.py <input.json>
 
-# LLM 增强模式（需配置 .env）
-python analyze.py <input.json> --llm
+# 禁用 LLM，仅用关键词规则分类
+python analyze.py <input.json> --no-llm
 ```
 
 ### Forum (`forum/`)
