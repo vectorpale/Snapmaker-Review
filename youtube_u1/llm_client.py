@@ -33,7 +33,7 @@ def init_llm_client(api_key):
     阿里云 DashScope 是国内服务，不需要代理。
     显式传入 http_client 禁用代理，避免环境变量中的 HTTPS_PROXY 干扰。
     """
-    http_client = httpx.Client(proxy=None, timeout=600.0)
+    http_client = httpx.Client(proxy=None, timeout=1800.0)
     return OpenAI(api_key=api_key, base_url=LLM_BASE_URL, http_client=http_client)
 
 
