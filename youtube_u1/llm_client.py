@@ -8,6 +8,7 @@ import json
 import logging
 import time
 
+import httpx
 from openai import OpenAI
 
 from config import (
@@ -27,8 +28,13 @@ logger = logging.getLogger(__name__)
 
 
 def init_llm_client(api_key):
-    """创建 OpenAI 兼容客户端（qwen3.5-plus 含思考模式，需要较长超时）"""
-    return OpenAI(api_key=api_key, base_url=LLM_BASE_URL, timeout=600.0)
+    """创建 OpenAI 兼容客户端（qwen3.5-plus 含思考模式，需要较长超时）。
+
+    阿里云 DashScope 是国内服务，不需要代理。
+    显式传入 http_client 禁用代理，避免环境变量中的 HTTPS_PROXY 干扰。
+    """
+    http_client = httpx.Client(proxy=None, timeout=600.0)
+    return OpenAI(api_key=api_key, base_url=LLM_BASE_URL, http_client=http_client)
 
 
 def preflight_check_llm(client):
