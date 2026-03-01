@@ -11,6 +11,7 @@ for post classification and sub-category analysis.
 
 import json
 import os
+import re
 import time
 from typing import Dict, List, Optional
 
@@ -179,17 +180,23 @@ class LLMClient:
         self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
 
     def _call_llm(self, prompt: str, max_retries: int = 3) -> str:
-        """Call LLM with retry logic."""
+        """Call LLM with retry logic. Disables thinking mode for Qwen 3.5+ models."""
+        # Build extra parameters to disable thinking mode on Qwen 3.5+
+        extra_body = {}
+        if "qwen3" in self.model.lower():
+            extra_body["enable_thinking"] = False
+
         for attempt in range(max_retries):
             try:
                 response = self.client.chat.completions.create(
                     model=self.model,
                     messages=[
-                        {"role": "system", "content": "你是一个专业的用户反馈分析师，专注于3D打印机产品。请始终以JSON格式回复。"},
+                        {"role": "system", "content": "你是一个专业的用户反馈分析师，专注于3D打印机产品。请始终以纯JSON格式回复，不要添加任何额外文字、解释或markdown格式。"},
                         {"role": "user", "content": prompt},
                     ],
                     temperature=0.1,
                     max_tokens=4096,
+                    **({"extra_body": extra_body} if extra_body else {}),
                 )
                 return response.choices[0].message.content.strip()
             except Exception as e:
@@ -202,23 +209,47 @@ class LLMClient:
                     raise
 
     def _parse_json_response(self, text: str) -> any:
-        """Parse JSON from LLM response, handling markdown code blocks."""
+        """Parse JSON from LLM response, handling thinking tags, markdown code blocks, etc."""
         text = text.strip()
-        if text.startswith("```"):
-            lines = text.split("\n")
-            json_lines = []
-            in_block = False
-            for line in lines:
-                if line.strip().startswith("```") and not in_block:
-                    in_block = True
-                    continue
-                elif line.strip() == "```" and in_block:
-                    break
-                elif in_block:
-                    json_lines.append(line)
-            text = "\n".join(json_lines)
 
-        return json.loads(text)
+        # Strip Qwen 3.5 thinking mode tags: <think>...</think>
+        text = re.sub(r"<think>[\s\S]*?</think>", "", text).strip()
+
+        # Try direct parse first (fast path)
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+
+        # Extract from markdown code blocks (```json ... ``` or ``` ... ```)
+        md_match = re.search(r"```(?:json)?\s*\n([\s\S]*?)```", text)
+        if md_match:
+            try:
+                return json.loads(md_match.group(1).strip())
+            except json.JSONDecodeError:
+                pass
+
+        # Last resort: find the outermost JSON array or object in the text
+        # Try array first (batch responses are arrays), then object
+        for open_char, close_char in [("[", "]"), ("{", "}")]:
+            start = text.find(open_char)
+            if start == -1:
+                continue
+            # Find matching closing bracket by scanning from the end
+            end = text.rfind(close_char)
+            if end > start:
+                candidate = text[start:end + 1]
+                try:
+                    return json.loads(candidate)
+                except json.JSONDecodeError:
+                    pass
+
+        # All strategies failed – raise with context for debugging
+        preview = text[:200] + ("..." if len(text) > 200 else "")
+        raise json.JSONDecodeError(
+            f"No valid JSON found in LLM response. Preview: {preview}",
+            text, 0
+        )
 
     def classify_post(self, post_text: str) -> Dict:
         """Classify a single post: content_type + sentiment."""
