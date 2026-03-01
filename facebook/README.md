@@ -58,7 +58,7 @@ Expects a JSON file exported from the Facebook group with the following structur
 ## Project Structure
 
 ```
-fb-analysis/
+facebook/
 ├── analyze.py              # Main entry point
 ├── classifier.py           # Multi-label classification engine
 ├── sentiment.py            # Sentiment analysis
