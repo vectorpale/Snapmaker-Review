@@ -66,6 +66,16 @@ def _extract_subtitles(video_id):
     if os.path.isfile(_node_path):
         ydl_opts["js_runtimes"] = {"node": {"path": _node_path}}
 
+    # Cookie 支持（解决 YouTube bot 检测 / "Sign in to confirm" 错误）
+    # 方式1: 指定 cookies.txt 文件路径，如 YOUTUBE_COOKIES=/path/to/cookies.txt
+    # 方式2: 从浏览器自动提取，如 YOUTUBE_COOKIES_BROWSER=chrome
+    cookies_file = os.environ.get("YOUTUBE_COOKIES")
+    cookies_browser = os.environ.get("YOUTUBE_COOKIES_BROWSER")
+    if cookies_file and os.path.isfile(cookies_file):
+        ydl_opts["cookiefile"] = cookies_file
+    elif cookies_browser:
+        ydl_opts["cookiesfrombrowser"] = (cookies_browser,)
+
     # 代理支持（从环境变量读取）
     proxy_url = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
     if proxy_url:
