@@ -102,9 +102,9 @@ def parse_duration(iso_duration):
 # ===== 相关性与质量过滤 =====
 
 def is_relevant(video):
-    """Layer 1: 标题必须含 'u1'（确保是 U1 相关视频，含对比视频）"""
-    title_lower = video["title"].lower()
-    return "u1" in title_lower
+    """Layer 1: 标题或描述含相关关键词"""
+    text = (video["title"] + " " + video["description"]).lower()
+    return any(kw in text for kw in RELEVANCE_KEYWORDS)
 
 
 def passes_quality(video):

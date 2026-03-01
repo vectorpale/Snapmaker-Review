@@ -9,8 +9,8 @@
   }
 
   body {
-    font-family: "Microsoft YaHei", "SimHei", "WenQuanYi Zen Hei",
-                 "Noto Sans CJK SC", "PingFang SC", sans-serif;
+    font-family: "WenQuanYi Zen Hei", "Noto Sans CJK SC", "Microsoft YaHei",
+                 "SimHei", "PingFang SC", sans-serif;
     font-size: 10pt;
     line-height: 1.6;
     color: #333;
@@ -140,7 +140,7 @@
   </div>
 </div>
 
-<pdf:nextpage />
+<div style="page-break-before: always;"></div>
 
 <!-- ==================== EXECUTIVE SUMMARY ==================== -->
 <h2>执行摘要</h2>
@@ -171,7 +171,7 @@
 {% endif %}
 
 <!-- ==================== SECTION 1: VIDEO ANALYSIS ==================== -->
-<pdf:nextpage />
+<div style="page-break-before: always;"></div>
 <h2>第一部分：评测视频分析总结</h2>
 
 <h3>1.1 整体口碑评估</h3>
@@ -202,7 +202,7 @@
 {% endif %}
 
 <!-- Per-Video Summaries -->
-<pdf:nextpage />
+<div style="page-break-before: always;"></div>
 <h3>1.6 各视频观点摘要</h3>
 <p class="text-muted">以下为各评测视频的核心观点（按观看量排序），作为上述总结的论据。</p>
 
@@ -228,7 +228,7 @@
 {% endfor %}
 
 <!-- ==================== SECTION 2: COMMENT SENTIMENT ==================== -->
-<pdf:nextpage />
+<div style="page-break-before: always;"></div>
 <h2>第二部分：评论情感分析</h2>
 
 <h3>2.1 整体情感分布</h3>
@@ -285,7 +285,7 @@
 {% endif %}
 
 <!-- Comment examples by category -->
-<pdf:nextpage />
+<div style="page-break-before: always;"></div>
 <h3>2.4 正面评论代表</h3>
 <p class="text-muted">以下为点赞最高的正面评论（共 {{ sentiment_counts.get('positive', 0) }} 条正面评论）</p>
 {% for c in comment_examples.positive %}
@@ -323,7 +323,7 @@
 {% endfor %}
 
 <!-- ==================== APPENDIX ==================== -->
-<pdf:nextpage />
+<div style="page-break-before: always;"></div>
 <h2>附录：视频索引</h2>
 <table class="data-table">
   <tr>

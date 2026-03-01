@@ -259,7 +259,7 @@ def generate_overall_with_llm(client, llm_results, videos):
         f"(prompt: {len(prompt):,} chars)..."
     )
 
-    result = _call_llm(client, prompt, max_tokens=8192)
+    result = _call_llm(client, prompt, max_tokens=16384)
     if result:
         return {"status": "success", "analysis_text": result, "error": None}
     return {
