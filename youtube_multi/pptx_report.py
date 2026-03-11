@@ -1063,6 +1063,9 @@ def generate_pptx_report(
     llm_results,
     overall_llm,
     output_path,
+    overall_llm_u1=None,
+    overall_llm_h2c=None,
+    overall_llm_comp=None,
 ):
     """
     生成 PowerPoint 产品分析报告。

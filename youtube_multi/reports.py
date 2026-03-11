@@ -3,10 +3,13 @@
 
 生成单视频详情报告和总体综合分析报告。
 输出中文 Markdown，LLM 分析结果作为核心内容。
+支持三板块结构：U1评测、H2C评测、综合对比。
 """
 
 import re
 from collections import Counter
+
+from config import VIDEO_CATEGORIES
 
 
 def generate_per_video_report(video, content_analysis, video_comments_df,
@@ -51,6 +54,8 @@ def generate_per_video_report(video, content_analysis, video_comments_df,
     r.append(
         f"| **YouTube 链接** | https://www.youtube.com/watch?v={vid} |"
     )
+    cat_label = VIDEO_CATEGORIES.get(video.get("category", "u1_review"), "未知")
+    r.append(f"| **视频分类** | {cat_label} |")
     r.append("")
 
     # --- 赞助/样机状态 ---
@@ -135,16 +140,31 @@ def generate_per_video_report(video, content_analysis, video_comments_df,
 
 def generate_overall_report(top_videos, filter_stats, df_meaningful,
                             transcript_stats, video_content_analysis,
-                            channel_profiles, llm_results, overall_llm):
+                            channel_profiles, llm_results,
+                            overall_llm_u1=None, overall_llm_h2c=None,
+                            overall_llm_comp=None, overall_llm=None):
     """
-    生成总体综合分析报告（中文 Markdown）。
+    生成总体综合分析报告（中文 Markdown，三板块结构）。
 
     返回: str (Markdown 文本)
     """
     import pandas as pd
 
+    # Backward compat
+    if overall_llm_u1 is None:
+        overall_llm_u1 = overall_llm or {}
+    if overall_llm_h2c is None:
+        overall_llm_h2c = {}
+    if overall_llm_comp is None:
+        overall_llm_comp = {}
+
+    # Categorize videos
+    u1_videos = [v for v in top_videos if v.get("category") == "u1_review"]
+    h2c_videos = [v for v in top_videos if v.get("category") == "h2c_review"]
+    comp_videos = [v for v in top_videos if v.get("category") == "comparison"]
+
     report = []
-    report.append("# Snapmaker U1 YouTube 评测视频综合分析报告\n")
+    report.append("# YouTube 3D打印评测视频综合分析报告\n")
     report.append(
         f"**生成时间**: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}"
     )
@@ -156,54 +176,107 @@ def generate_overall_report(top_videos, filter_stats, df_meaningful,
     report.append("## 1. 数据概况\n")
     report.append("| 指标 | 数值 |")
     report.append("|---|---|")
-    report.append(
-        f"| 搜索候选视频 | {filter_stats['total_searched']} |"
-    )
-    report.append(
-        f"| 相关性过滤后 | {filter_stats['after_relevance_filter']} |"
-    )
-    report.append(
-        f"| 质量过滤后 | {filter_stats['after_quality_filter']} |"
-    )
+    report.append(f"| 搜索候选视频 | {filter_stats['total_searched']} |")
+    report.append(f"| 相关性过滤后 | {filter_stats['after_relevance_filter']} |")
+    report.append(f"| 质量过滤后 | {filter_stats['after_quality_filter']} |")
     report.append(
         f"| 播放量 >= {filter_stats['min_view_count']:,} | "
         f"{filter_stats['after_view_filter']} |"
     )
-    report.append(
-        f"| 最终分析视频数 | {filter_stats['selected_count']} |"
-    )
-    report.append(
-        f"| 赞助/样机视频 | {filter_stats['sponsored_count']} |"
-    )
+    report.append(f"| 最终分析视频数 | {filter_stats['selected_count']} |")
+    report.append(f"| 　- 快造U1评测 | {len(u1_videos)} |")
+    report.append(f"| 　- 拓竹H2C评测 | {len(h2c_videos)} |")
+    report.append(f"| 　- 综合评测/对比 | {len(comp_videos)} |")
+    report.append(f"| 赞助/样机视频 | {filter_stats['sponsored_count']} |")
     report.append(
         f"| 总观看量 | {sum(v['view_count'] for v in top_videos):,} |"
     )
     report.append(
         f"| 获取评论数 | {filter_stats.get('total_comments', 0):,} |"
     )
-    report.append(
-        f"| 有效评论数 | {len(df_meaningful):,} |"
-    )
-    report.append(
-        f"| 成功转录视频 | {transcript_stats['success']} |"
-    )
+    report.append(f"| 有效评论数 | {len(df_meaningful):,} |")
+    report.append(f"| 成功转录视频 | {transcript_stats['success']} |")
     report.append("")
 
-    # 2. AI 综合分析报告（核心内容）
-    report.append("## 2. AI 综合分析报告\n")
-    if overall_llm.get("status") == "success" and overall_llm.get(
-            "analysis_text"):
-        report.append(overall_llm["analysis_text"])
+    # 2. 板块一：快造U1评测视频分析
+    report.append("---\n")
+    report.append("## 2. 板块一：快造U1评测视频分析\n")
+    if overall_llm_u1.get("status") == "success" and overall_llm_u1.get("analysis_text"):
+        report.append(overall_llm_u1["analysis_text"])
     else:
-        report.append(
-            f"*综合分析生成失败: {overall_llm.get('error', '未知错误')}*"
-        )
+        report.append(f"*U1 综合分析未完成: {overall_llm_u1.get('error', '无数据')}*")
     report.append("")
 
-    # 3. 视频来源频道画像
-    report.append("## 3. 视频来源频道画像\n")
-    report.append("| 频道 | 粉丝数 | 国家 | 观看量 | 赞助 |")
-    report.append("|---|---|---|---|---|")
+    # U1 视频索引
+    report.append("### U1 评测视频索引\n")
+    if u1_videos:
+        report.append("| # | 频道 | 标题 | 观看量 | 赞助 | LLM |")
+        report.append("|---|---|---|---|---|---|")
+        for i, v in enumerate(u1_videos, 1):
+            sp_icon = "是" if v.get("sponsor_status", {}).get("is_sponsored") else ""
+            llm_status = "OK" if llm_results.get(v["video_id"], {}).get("transcript", {}).get("status") == "success" else "N/A"
+            report.append(
+                f"| {i} | {v['channel'][:18]} | {v['title'][:35]} | "
+                f"{v['view_count']:,} | {sp_icon} | {llm_status} |"
+            )
+    else:
+        report.append("*无 U1 评测视频*")
+    report.append("")
+
+    # 3. 板块二：拓竹H2C/Vortek评测视频分析
+    report.append("---\n")
+    report.append("## 3. 板块二：拓竹H2C/Vortek评测视频分析\n")
+    if overall_llm_h2c.get("status") == "success" and overall_llm_h2c.get("analysis_text"):
+        report.append(overall_llm_h2c["analysis_text"])
+    else:
+        report.append(f"*H2C 综合分析未完成: {overall_llm_h2c.get('error', '无数据')}*")
+    report.append("")
+
+    # H2C 视频索引
+    report.append("### H2C 评测视频索引\n")
+    if h2c_videos:
+        report.append("| # | 频道 | 标题 | 观看量 | 赞助 | LLM |")
+        report.append("|---|---|---|---|---|---|")
+        for i, v in enumerate(h2c_videos, 1):
+            sp_icon = "是" if v.get("sponsor_status", {}).get("is_sponsored") else ""
+            llm_status = "OK" if llm_results.get(v["video_id"], {}).get("transcript", {}).get("status") == "success" else "N/A"
+            report.append(
+                f"| {i} | {v['channel'][:18]} | {v['title'][:35]} | "
+                f"{v['view_count']:,} | {sp_icon} | {llm_status} |"
+            )
+    else:
+        report.append("*无 H2C 评测视频*")
+    report.append("")
+
+    # 4. 板块三：综合评测/对比视频分析
+    report.append("---\n")
+    report.append("## 4. 板块三：综合评测/对比视频分析\n")
+    if overall_llm_comp.get("status") == "success" and overall_llm_comp.get("analysis_text"):
+        report.append(overall_llm_comp["analysis_text"])
+    else:
+        report.append(f"*对比综合分析未完成: {overall_llm_comp.get('error', '无数据')}*")
+    report.append("")
+
+    # 对比视频索引
+    report.append("### 综合评测视频索引\n")
+    if comp_videos:
+        report.append("| # | 频道 | 标题 | 观看量 | 赞助 | LLM |")
+        report.append("|---|---|---|---|---|---|")
+        for i, v in enumerate(comp_videos, 1):
+            sp_icon = "是" if v.get("sponsor_status", {}).get("is_sponsored") else ""
+            llm_status = "OK" if llm_results.get(v["video_id"], {}).get("transcript", {}).get("status") == "success" else "N/A"
+            report.append(
+                f"| {i} | {v['channel'][:18]} | {v['title'][:35]} | "
+                f"{v['view_count']:,} | {sp_icon} | {llm_status} |"
+            )
+    else:
+        report.append("*无综合评测视频*")
+    report.append("")
+
+    # 5. 视频来源频道画像
+    report.append("## 5. 视频来源频道画像\n")
+    report.append("| 频道 | 粉丝数 | 国家 | 观看量 | 分类 | 赞助 |")
+    report.append("|---|---|---|---|---|---|")
     seen_channels = set()
     for v in top_videos:
         ch = v.get("channel_profile", {})
@@ -213,15 +286,16 @@ def generate_overall_report(top_videos, filter_stats, df_meaningful,
         seen_channels.add(ch_name)
         subs_str = _format_subs(ch.get("subscriber_count", 0))
         country = ch.get("channel_country", "?")
+        cat_label = VIDEO_CATEGORIES.get(v.get("category", "u1_review"), "未知")
         sp = "是" if v.get("sponsor_status", {}).get("is_sponsored") else ""
         report.append(
             f"| {ch_name[:25]} | {subs_str} | {country} "
-            f"| {v['view_count']:,} | {sp} |"
+            f"| {v['view_count']:,} | {cat_label} | {sp} |"
         )
     report.append("")
 
-    # 4. 赞助/样机状态分布
-    report.append("## 4. 赞助/样机状态分布\n")
+    # 6. 赞助/样机状态分布
+    report.append("## 6. 赞助/样机状态分布\n")
     sponsor_types = Counter(
         v.get("sponsor_status", {}).get("sponsor_type", "unknown")
         for v in top_videos
@@ -238,8 +312,8 @@ def generate_overall_report(top_videos, filter_stats, df_meaningful,
         report.append(f"- {label}: {count} 个视频")
     report.append("")
 
-    # 5. 评论情感分布（关键词分析补充）
-    report.append("## 5. 评论情感分布（关键词分析）\n")
+    # 7. 评论情感分布
+    report.append("## 7. 评论情感分布（关键词分析）\n")
     if len(df_meaningful) > 0:
         for sent, count in df_meaningful["sentiment"].value_counts().items():
             pct = count / len(df_meaningful) * 100
@@ -247,47 +321,26 @@ def generate_overall_report(top_videos, filter_stats, df_meaningful,
             report.append(f"- **{sent}**: {count} ({pct:.1f}%) {bar}")
     report.append("")
 
-    # 6. 用户关注主题 Top 15（关键词分析补充）
-    topic_counter = Counter()
-    if len(df_meaningful) > 0:
-        for topics in df_meaningful["topics"]:
-            if isinstance(topics, list):
-                topic_counter.update(topics)
-    report.append("## 6. 用户关注主题 Top 15（关键词分析）\n")
-    report.append("| 排名 | 主题 | 提及次数 | 占比 |")
-    report.append("|---|---|---|---|")
-    for rank, (topic, count) in enumerate(
-            topic_counter.most_common(15), 1):
-        pct = count / max(len(df_meaningful), 1) * 100
-        report.append(f"| {rank} | {topic} | {count} | {pct:.1f}% |")
-    report.append("")
-
-    # 7. 视频索引
-    report.append("## 7. 视频索引\n")
+    # 8. 完整视频索引
+    report.append("## 8. 完整视频索引\n")
     report.append(
-        "| # | 频道 | 粉丝 | 标题 | 观看量 | 赞助 | 转录 | LLM |"
+        "| # | 频道 | 标题 | 观看量 | 分类 | 赞助 | LLM |"
     )
-    report.append("|---|---|---|---|---|---|---|---|")
+    report.append("|---|---|---|---|---|---|---|")
     for i, v in enumerate(top_videos, 1):
-        ca = video_content_analysis.get(v["video_id"], {})
-        tr_status = (
-            "OK" if ca.get("transcript_status") == "success" else "N/A"
-        )
         llm_status = (
             "OK" if llm_results.get(v["video_id"], {}).get(
                 "transcript", {}).get("status") == "success"
             else "N/A"
         )
-        subs_str = _format_subs(
-            v.get("channel_profile", {}).get("subscriber_count", 0)
-        )
+        cat_label = VIDEO_CATEGORIES.get(v.get("category", "u1_review"), "未知")
         sp_icon = (
             "是" if v.get("sponsor_status", {}).get("is_sponsored") else ""
         )
         report.append(
-            f"| {i} | {v['channel'][:18]} | {subs_str} | "
-            f"{v['title'][:35]} | {v['view_count']:,} | {sp_icon} | "
-            f"{tr_status} | {llm_status} |"
+            f"| {i} | {v['channel'][:18]} | "
+            f"{v['title'][:35]} | {v['view_count']:,} | {cat_label} | {sp_icon} | "
+            f"{llm_status} |"
         )
     report.append("")
 

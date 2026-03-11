@@ -21,9 +21,34 @@ from config import (
     LLM_MAX_RETRIES,
     LLM_RETRY_BASE_DELAY,
     PROMPT_TRANSCRIPT_ANALYSIS,
+    PROMPT_TRANSCRIPT_ANALYSIS_H2C,
+    PROMPT_TRANSCRIPT_ANALYSIS_COMPARISON,
     PROMPT_COMMENT_ANALYSIS,
+    PROMPT_COMMENT_ANALYSIS_H2C,
+    PROMPT_COMMENT_ANALYSIS_COMPARISON,
     PROMPT_OVERALL_REPORT,
+    PROMPT_OVERALL_REPORT_U1,
+    PROMPT_OVERALL_REPORT_H2C,
+    PROMPT_OVERALL_REPORT_COMPARISON,
 )
+
+TRANSCRIPT_PROMPTS = {
+    "u1_review": PROMPT_TRANSCRIPT_ANALYSIS,
+    "h2c_review": PROMPT_TRANSCRIPT_ANALYSIS_H2C,
+    "comparison": PROMPT_TRANSCRIPT_ANALYSIS_COMPARISON,
+}
+
+COMMENT_PROMPTS = {
+    "u1_review": PROMPT_COMMENT_ANALYSIS,
+    "h2c_review": PROMPT_COMMENT_ANALYSIS_H2C,
+    "comparison": PROMPT_COMMENT_ANALYSIS_COMPARISON,
+}
+
+OVERALL_PROMPTS = {
+    "u1_review": PROMPT_OVERALL_REPORT_U1,
+    "h2c_review": PROMPT_OVERALL_REPORT_H2C,
+    "comparison": PROMPT_OVERALL_REPORT_COMPARISON,
+}
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +131,7 @@ def _call_llm(client, prompt, max_tokens=None, model=None):
     return None
 
 
-def analyze_transcript_with_llm(client, video, transcript_text):
+def analyze_transcript_with_llm(client, video, transcript_text, category="u1_review"):
     """
     使用 LLM 深度分析单个视频的字幕内容。
 
@@ -126,7 +151,8 @@ def analyze_transcript_with_llm(client, video, transcript_text):
         transcript_text = transcript_text[:max_chars]
         truncated = True
 
-    prompt = PROMPT_TRANSCRIPT_ANALYSIS.format(
+    prompt_template = TRANSCRIPT_PROMPTS.get(category, PROMPT_TRANSCRIPT_ANALYSIS)
+    prompt = prompt_template.format(
         title=video["title"],
         channel=video["channel"],
         view_count=video["view_count"],
@@ -141,7 +167,8 @@ def analyze_transcript_with_llm(client, video, transcript_text):
         f"({len(transcript_text):,} chars)..."
     )
 
-    result = _call_llm(client, prompt, model=LLM_MODEL_DEEP)
+    tok = 8192 if category == "comparison" else None
+    result = _call_llm(client, prompt, max_tokens=tok, model=LLM_MODEL_DEEP)
     if result:
         return {"status": "success", "analysis_text": result, "error": None}
     return {
@@ -151,7 +178,7 @@ def analyze_transcript_with_llm(client, video, transcript_text):
     }
 
 
-def analyze_comments_with_llm(client, video, comments_df):
+def analyze_comments_with_llm(client, video, comments_df, category="u1_review"):
     """
     使用 LLM 分析单个视频的评论。
 
@@ -187,7 +214,8 @@ def analyze_comments_with_llm(client, video, comments_df):
     if len(comments_text) > 80_000:
         comments_text = comments_text[:80_000] + "\n\n[...评论已截断...]"
 
-    prompt = PROMPT_COMMENT_ANALYSIS.format(
+    prompt_template = COMMENT_PROMPTS.get(category, PROMPT_COMMENT_ANALYSIS)
+    prompt = prompt_template.format(
         title=video["title"],
         channel=video["channel"],
         comment_count=len(comments_df),
@@ -215,7 +243,7 @@ def analyze_comments_with_llm(client, video, comments_df):
     }
 
 
-def generate_overall_with_llm(client, llm_results, videos):
+def generate_overall_with_llm(client, llm_results, videos, category="u1_review"):
     """
     使用 LLM 生成跨视频综合分析报告。
 
@@ -265,7 +293,8 @@ def generate_overall_with_llm(client, llm_results, videos):
         video_summaries = video_summaries[:int(len(video_summaries) * ratio)]
         comment_summaries = comment_summaries[:int(len(comment_summaries) * ratio)]
 
-    prompt = PROMPT_OVERALL_REPORT.format(
+    prompt_template = OVERALL_PROMPTS.get(category, PROMPT_OVERALL_REPORT)
+    prompt = prompt_template.format(
         video_count=len(videos),
         video_summaries=video_summaries,
         comment_summaries=comment_summaries,

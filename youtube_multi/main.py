@@ -13,6 +13,7 @@ import json
 import re
 import time
 import logging
+from collections import Counter
 from pathlib import Path
 
 # 确保能导入同目录下的模块
@@ -23,9 +24,9 @@ import pandas as pd
 
 from config import (
     DATA_DIR, PER_VIDEO_DATA_DIR, REPORTS_DIR, PER_VIDEO_REPORTS_DIR,
-    PUBLISHED_AFTER, SEARCH_QUERIES, KNOWN_REVIEWERS, KNOWN_CHANNEL_NAMES,
-    KEY_INFO_PATTERNS, MIN_VIEW_COUNT, TOP_N_VIDEOS,
-    LLM_RATE_LIMIT_DELAY,
+    PUBLISHED_AFTER, SEARCH_QUERIES, KNOWN_REVIEWERS, KNOWN_REVIEWERS_H2C,
+    KNOWN_CHANNEL_NAMES, KEY_INFO_PATTERNS, MIN_VIEW_COUNT, TOP_N_VIDEOS,
+    LLM_RATE_LIMIT_DELAY, VIDEO_CATEGORIES,
 )
 from youtube_api import (
     init_youtube_client, search_videos, search_known_reviewers,
@@ -34,7 +35,7 @@ from youtube_api import (
 from transcript import get_transcript, segment_transcript, format_timestamp
 from analysis import (
     detect_sponsor_status, parse_duration, is_relevant, passes_quality,
-    find_key_moments, analyze_sentiment, tag_topics,
+    find_key_moments, analyze_sentiment, tag_topics, classify_video,
 )
 from comments import get_all_comments, clean_comment
 from llm_client import (
@@ -139,7 +140,7 @@ def main():
     logger.info("LLM 预检通过")
 
     logger.info("=" * 60)
-    logger.info("Snapmaker U1 YouTube 用户反馈提取系统（LLM 深度分析版）")
+    logger.info("YouTube 3D打印评测视频综合分析系统（U1 + H2C + 对比）")
     logger.info(f"时间范围: {PUBLISHED_AFTER} 至今")
     logger.info(f"筛选条件: 播放量 >= {MIN_VIEW_COUNT:,}，取前 {TOP_N_VIDEOS} 个")
     logger.info("=" * 60)
@@ -157,6 +158,10 @@ def main():
         )
         all_video_ids, video_search_results = search_known_reviewers(
             youtube, KNOWN_REVIEWERS, video_search_results,
+            all_video_ids, PUBLISHED_AFTER,
+        )
+        all_video_ids, video_search_results = search_known_reviewers(
+            youtube, KNOWN_REVIEWERS_H2C, video_search_results,
             all_video_ids, PUBLISHED_AFTER,
         )
         save_checkpoint("search_results", {
@@ -257,6 +262,15 @@ def main():
         high_view.values(), key=lambda x: x["view_count"], reverse=True,
     )[:TOP_N_VIDEOS]
 
+    # ===== Step 2.5: 视频分类 =====
+    logger.info("\nStep 2.5: 视频分类")
+    for video in top_videos:
+        video["category"] = classify_video(video)
+
+    cat_counts = Counter(v["category"] for v in top_videos)
+    for cat, label in VIDEO_CATEGORIES.items():
+        logger.info(f"  {label}: {cat_counts.get(cat, 0)} 个视频")
+
     logger.info(f"\n{'=' * 100}")
     logger.info(f"Top {len(top_videos)} 视频列表:")
     logger.info(f"{'=' * 100}")
@@ -265,8 +279,9 @@ def main():
         subs = v.get("channel_profile", {}).get("subscriber_count", 0)
         subs_str = f"{subs / 1000:.0f}K" if subs >= 1000 else str(subs)
         sponsor = "[S]" if v.get("sponsor_status", {}).get("is_sponsored") else "   "
+        cat_label = VIDEO_CATEGORIES.get(v.get("category", "u1_review"), "未知")[:4]
         logger.info(
-            f"  {i:2d}. {sponsor} [{mins:3d}min] {v['view_count']:>10,} views | "
+            f"  {i:2d}. {sponsor} [{cat_label}] [{mins:3d}min] {v['view_count']:>10,} views | "
             f"{v['comment_count']:>4} cmt | {subs_str:>7} subs | "
             f"{v['channel'][:20]:20s} | {v['title'][:45]}"
         )
@@ -371,6 +386,30 @@ def main():
     logger.info(
         f"赞助检测更新（含转录分析）: {sponsored_after} 个视频标记为赞助/样机"
     )
+
+    # ===== Step 3.5: 用字幕重新验证分类 =====
+    logger.info("\nStep 3.5: 用字幕重新验证分类")
+    reclassified = 0
+    for video in top_videos:
+        vid = video["video_id"]
+        tr = transcript_results.get(vid, {})
+        if tr.get("status") == "success" and tr.get("full_text"):
+            old_cat = video.get("category", "u1_review")
+            new_cat = classify_video(video, tr.get("full_text", ""))
+            if new_cat != old_cat:
+                logger.info(
+                    f"  重分类: {video['channel'][:20]} - {video['title'][:30]} "
+                    f"({old_cat} -> {new_cat})"
+                )
+                video["category"] = new_cat
+                reclassified += 1
+
+    if reclassified > 0:
+        logger.info(f"重分类: {reclassified} 个视频类别已更新")
+        cat_counts = Counter(v["category"] for v in top_videos)
+        for cat, label in VIDEO_CATEGORIES.items():
+            logger.info(f"  {label}: {cat_counts.get(cat, 0)} 个视频")
+        save_checkpoint("video_index", top_videos)
 
     # ===== Step 4: 关键词内容分析（补充数据） =====
     logger.info("\nStep 4: 关键词内容分析（补充数据）")
@@ -549,6 +588,7 @@ def main():
         if tr.get("status") == "success" and tr.get("full_text"):
             transcript_analysis = analyze_transcript_with_llm(
                 llm, video, tr["full_text"],
+                category=video.get("category", "u1_review"),
             )
             vid_result["transcript"] = transcript_analysis
             logger.info(f"  字幕分析: {transcript_analysis['status']}")
@@ -570,6 +610,7 @@ def main():
 
         comment_analysis = analyze_comments_with_llm(
             llm, video, video_comments,
+            category=video.get("category", "u1_review"),
         )
         vid_result["comments"] = comment_analysis
         logger.info(f"  评论分析: {comment_analysis['status']}")
@@ -617,28 +658,55 @@ def main():
 
     logger.info(f"共生成 {len(top_videos)} 份视频详情报告")
 
-    # ===== Step 9: 生成总体报告（LLM 综合分析） =====
-    logger.info("\nStep 9: 生成总体报告（LLM 综合分析）")
+    # ===== Step 9: 生成总体报告（LLM 综合分析 — 三板块） =====
+    logger.info("\nStep 9: 生成总体报告（LLM 综合分析 — 三板块）")
 
-    cached_overall = load_checkpoint("overall_llm_analysis")
-    # 当视频数量变化时（如从 30 扩展到 50），自动重新生成综合分析
-    if cached_overall and cached_overall.get("status") == "success":
-        cached_video_count = cached_overall.get("video_count", 0)
-        if cached_video_count != len(top_videos):
-            logger.info(
-                f"视频数量变化 ({cached_video_count} -> {len(top_videos)})，"
-                f"重新生成综合分析"
-            )
-            cached_overall = None
+    # 按类别分组
+    u1_videos = [v for v in top_videos if v.get("category") == "u1_review"]
+    h2c_videos = [v for v in top_videos if v.get("category") == "h2c_review"]
+    comp_videos = [v for v in top_videos if v.get("category") == "comparison"]
 
-    if cached_overall and cached_overall.get("status") == "success":
-        overall_llm = cached_overall
-        logger.info("从检查点加载综合分析结果（跳过 LLM 调用）")
+    # U1 综合分析
+    cached_u1 = load_checkpoint("overall_llm_analysis_u1")
+    if cached_u1 and cached_u1.get("status") == "success" and cached_u1.get("video_count") == len(u1_videos):
+        overall_llm_u1 = cached_u1
+        logger.info(f"从检查点加载 U1 综合分析（{len(u1_videos)} 个视频）")
+    elif len(u1_videos) > 0:
+        overall_llm_u1 = generate_overall_with_llm(llm, llm_results, u1_videos, category="u1_review")
+        overall_llm_u1["video_count"] = len(u1_videos)
+        save_checkpoint("overall_llm_analysis_u1", overall_llm_u1)
     else:
-        overall_llm = generate_overall_with_llm(llm, llm_results, top_videos)
-        overall_llm["video_count"] = len(top_videos)
-        save_checkpoint("overall_llm_analysis", overall_llm)
-    logger.info(f"LLM 综合分析: {overall_llm['status']}")
+        overall_llm_u1 = {"status": "skipped", "analysis_text": "", "error": "无U1视频"}
+    logger.info(f"U1 综合分析: {overall_llm_u1['status']} ({len(u1_videos)} 个视频)")
+
+    # H2C 综合分析
+    cached_h2c = load_checkpoint("overall_llm_analysis_h2c")
+    if cached_h2c and cached_h2c.get("status") == "success" and cached_h2c.get("video_count") == len(h2c_videos):
+        overall_llm_h2c = cached_h2c
+        logger.info(f"从检查点加载 H2C 综合分析（{len(h2c_videos)} 个视频）")
+    elif len(h2c_videos) > 0:
+        overall_llm_h2c = generate_overall_with_llm(llm, llm_results, h2c_videos, category="h2c_review")
+        overall_llm_h2c["video_count"] = len(h2c_videos)
+        save_checkpoint("overall_llm_analysis_h2c", overall_llm_h2c)
+    else:
+        overall_llm_h2c = {"status": "skipped", "analysis_text": "", "error": "无H2C视频"}
+    logger.info(f"H2C 综合分析: {overall_llm_h2c['status']} ({len(h2c_videos)} 个视频)")
+
+    # 对比综合分析
+    cached_comp = load_checkpoint("overall_llm_analysis_comparison")
+    if cached_comp and cached_comp.get("status") == "success" and cached_comp.get("video_count") == len(comp_videos):
+        overall_llm_comp = cached_comp
+        logger.info(f"从检查点加载对比综合分析（{len(comp_videos)} 个视频）")
+    elif len(comp_videos) > 0:
+        overall_llm_comp = generate_overall_with_llm(llm, llm_results, comp_videos, category="comparison")
+        overall_llm_comp["video_count"] = len(comp_videos)
+        save_checkpoint("overall_llm_analysis_comparison", overall_llm_comp)
+    else:
+        overall_llm_comp = {"status": "skipped", "analysis_text": "", "error": "无对比视频"}
+    logger.info(f"对比综合分析: {overall_llm_comp['status']} ({len(comp_videos)} 个视频)")
+
+    # 兼容旧变量名
+    overall_llm = overall_llm_u1
 
     report_text = generate_overall_report(
         top_videos=top_videos,
@@ -648,7 +716,9 @@ def main():
         video_content_analysis=video_content_analysis,
         channel_profiles=channel_profiles,
         llm_results=llm_results,
-        overall_llm=overall_llm,
+        overall_llm_u1=overall_llm_u1,
+        overall_llm_h2c=overall_llm_h2c,
+        overall_llm_comp=overall_llm_comp,
     )
 
     report_path = REPORTS_DIR / "youtube_analysis_report.md"
@@ -660,13 +730,16 @@ def main():
     logger.info("\nStep 10: 生成 PowerPoint 产品分析报告")
 
     try:
-        pptx_path = REPORTS_DIR / "snapmaker_u1_feedback_report.pptx"
+        pptx_path = REPORTS_DIR / "youtube_feedback_report.pptx"
         generate_pptx_report(
             top_videos=top_videos,
             filter_stats=filter_stats,
             df_comments=df_meaningful,
             llm_results=llm_results,
             overall_llm=overall_llm,
+            overall_llm_u1=overall_llm_u1,
+            overall_llm_h2c=overall_llm_h2c,
+            overall_llm_comp=overall_llm_comp,
             output_path=pptx_path,
         )
     except Exception as e:
@@ -677,13 +750,16 @@ def main():
     logger.info("\nStep 11: 生成 Excel 数据分析报告")
 
     try:
-        xlsx_path = REPORTS_DIR / "snapmaker_u1_feedback_data.xlsx"
+        xlsx_path = REPORTS_DIR / "youtube_feedback_data.xlsx"
         generate_excel_report(
             top_videos=top_videos,
             filter_stats=filter_stats,
             df_comments=df_meaningful,
             llm_results=llm_results,
             overall_llm=overall_llm,
+            overall_llm_u1=overall_llm_u1,
+            overall_llm_h2c=overall_llm_h2c,
+            overall_llm_comp=overall_llm_comp,
             output_path=xlsx_path,
         )
     except Exception as e:

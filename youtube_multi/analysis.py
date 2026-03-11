@@ -10,6 +10,7 @@ from collections import Counter
 from config import (
     SPONSOR_PATTERNS, KEY_INFO_PATTERNS, TOPIC_KEYWORDS,
     POSITIVE_KW, NEGATIVE_KW, RELEVANCE_KEYWORDS, KNOWN_CHANNEL_NAMES,
+    U1_KEYWORDS, H2C_KEYWORDS, BAMBU_BROAD_KEYWORDS, COMPARISON_SIGNALS,
 )
 
 
@@ -105,6 +106,86 @@ def is_relevant(video):
     """Layer 1: 标题或描述含相关关键词"""
     text = (video["title"] + " " + video["description"]).lower()
     return any(kw in text for kw in RELEVANCE_KEYWORDS)
+
+
+def classify_video(video, transcript_text=None):
+    """
+    将视频分类为 u1_review / h2c_review / comparison。
+
+    两轮分类：
+    - 第一轮：基于标题 + 描述（transcript_text=None）
+    - 第二轮：基于标题 + 描述 + 字幕文本（transcript_text 不为空时）
+
+    返回: "u1_review" | "h2c_review" | "comparison"
+    """
+    title = video.get("title", "")
+    description = video.get("description", "")
+    tags = " ".join(video.get("tags", []))
+
+    # Combine text for analysis
+    text = f"{title} {description} {tags}".lower()
+
+    # If transcript available, add first 5000 chars for analysis
+    if transcript_text:
+        text += " " + transcript_text[:5000].lower()
+
+    # Count keyword hits
+    u1_score = sum(1 for kw in U1_KEYWORDS if kw in text)
+    h2c_score = sum(1 for kw in H2C_KEYWORDS if kw in text)
+    bambu_score = sum(1 for kw in BAMBU_BROAD_KEYWORDS if kw in text)
+
+    # Check for comparison signals in title
+    title_lower = title.lower()
+    has_comparison = any(signal in title_lower for signal in COMPARISON_SIGNALS)
+
+    # Decision logic
+    # 1. Title has "vs" / "comparison" + both brands mentioned → comparison
+    if has_comparison and u1_score > 0 and (h2c_score > 0 or bambu_score > 0):
+        return "comparison"
+
+    # 2. Both brands clearly mentioned → comparison
+    if u1_score > 0 and h2c_score > 0:
+        return "comparison"
+
+    # 3. U1 mentioned + Bambu broadly mentioned (even without specific H2C)
+    if u1_score > 0 and bambu_score > 0:
+        # Check ratio — if Bambu mentions are minor, still U1 review
+        # (many U1 reviews mention Bambu as competitor)
+        # Only classify as comparison if comparison signals present
+        if has_comparison:
+            return "comparison"
+        # If transcript available, check if both are substantially discussed
+        if transcript_text:
+            t_lower = transcript_text.lower()
+            u1_mentions = sum(t_lower.count(kw) for kw in U1_KEYWORDS)
+            bambu_mentions = sum(t_lower.count(kw) for kw in H2C_KEYWORDS + BAMBU_BROAD_KEYWORDS)
+            if u1_mentions > 5 and bambu_mentions > 5:
+                ratio = u1_mentions / max(bambu_mentions, 1)
+                if 0.33 < ratio < 3.0:
+                    return "comparison"
+        return "u1_review"
+
+    # 4. Only U1 mentioned
+    if u1_score > 0:
+        return "u1_review"
+
+    # 5. Only H2C mentioned
+    if h2c_score > 0:
+        return "h2c_review"
+
+    # 6. Only broad Bambu mentioned (no specific H2C, no U1)
+    if bambu_score > 0:
+        return "h2c_review"
+
+    # 7. Fallback: check search_query source if available
+    search_query = video.get("search_query", "").lower()
+    if any(kw in search_query for kw in U1_KEYWORDS):
+        return "u1_review"
+    if any(kw in search_query for kw in H2C_KEYWORDS + BAMBU_BROAD_KEYWORDS):
+        return "h2c_review"
+
+    # Default
+    return "u1_review"
 
 
 def passes_quality(video):
