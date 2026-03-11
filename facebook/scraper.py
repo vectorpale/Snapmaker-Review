@@ -55,7 +55,7 @@ except ImportError:
 COOKIE_FILE = "fb_cookies.json"
 CHECKPOINT_DIR = "scraper_checkpoints"
 CHECKPOINT_EVERY = 50          # 每 N 条新帖子保存一次 checkpoint
-DOM_CLEANUP_EVERY = 30         # 每 N 次滚动清理一次 DOM
+DOM_CLEANUP_EVERY = 10         # 每 N 次滚动清理一次 DOM
 
 # 拟人滚动参数（与篡改猴脚本一致）
 SCROLL_DELAY_MIN = 0.5
@@ -308,13 +308,15 @@ JS_CLEANUP_DOM = """
 () => {
     const feed = document.querySelector('div[role="feed"]');
     if (!feed) return 0;
-    const viewportTop = window.scrollY;
     let cleaned = 0;
     for (let i = 0; i < feed.children.length; i++) {
         const child = feed.children[i];
+        if (child.dataset.cleaned === "1") continue;
         const rect = child.getBoundingClientRect();
-        if (rect.bottom > -3000) continue;
+        if (rect.bottom > -1500) continue;
         const h = child.offsetHeight;
+        // 先移除图片/视频/iframe 释放内存
+        child.querySelectorAll('img, video, iframe, source').forEach(el => el.remove());
         const placeholder = document.createElement("div");
         placeholder.style.height = h + "px";
         placeholder.dataset.cleaned = "1";
