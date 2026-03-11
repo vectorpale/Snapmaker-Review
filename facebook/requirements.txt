@@ -4,3 +4,4 @@ pandas>=2.0.0
 numpy>=1.24.0
 openai>=1.0.0          # Qwen API (OpenAI-compatible)
 # jieba>=0.42.1        # Optional: Chinese word segmentation
+playwright>=1.40.0         # Facebook group scraper
