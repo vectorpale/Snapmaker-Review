@@ -416,11 +416,14 @@ def login_interactive(page: Page, context: BrowserContext):
     print("登录成功后（看到新闻动态），按 Enter 继续...")
     page.goto("https://www.facebook.com/login", wait_until="domcontentloaded")
     input()
-    if "login" in page.url.lower():
+    # 检查是否仍在登录表单页（而非 URL 包含 login 字样，因为登录成功后
+    # 重定向 URL 也可能含 login_attempt 等参数）
+    still_on_login = page.query_selector('input[name="email"], input[name="pass"], #loginbutton')
+    if still_on_login:
         print("似乎尚未登录成功，请确认后再次运行。")
         sys.exit(1)
     save_cookies(context, COOKIE_FILE)
-    print("登录成功！\n")
+    print(f"登录成功！(当前 URL: {page.url})\n")
 
 
 def dismiss_popups(page: Page):
@@ -511,7 +514,7 @@ def run_scraper(args):
         print(f"正在打开群组...")
         page.goto(group_url, wait_until="domcontentloaded", timeout=60000)
         time.sleep(3)
-        if "login" in page.url.lower():
+        if page.query_selector('input[name="email"], input[name="pass"], #loginbutton'):
             print("Cookie 已过期，请重新使用 --login 登录。")
             browser.close()
             sys.exit(1)
