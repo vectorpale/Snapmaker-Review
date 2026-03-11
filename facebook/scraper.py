@@ -2,24 +2,31 @@
 """
 Facebook 群组数据采集工具 (Playwright)
 
+基于已验证的篡改猴脚本 v2.4 的 DOM 提取逻辑，用 Playwright 重写。
+解决篡改猴脚本的三大痛点：卡顿崩溃、数据丢失、耗时过长。
+
 功能:
-  - 自动登录 Facebook 并滚动加载群组帖子
-  - 展开并采集每个帖子的评论
-  - 每 N 条帖子自动保存 checkpoint，崩溃后可断点续抓
-  - 输出格式与 analyze.py 完全兼容
+  - 复用篡改猴脚本完全一致的 DOM 选择器和提取逻辑（注入浏览器执行）
+  - 每 50 条帖子自动保存 checkpoint（原子写入，崩溃不丢数据）
+  - 断点续抓：从上次 checkpoint 继续
+  - DOM 瘦身：自动清理已采集的帖子节点，防内存膨胀
+  - 拟人滚动：随机延迟 + 定期暂停，降低被限流风险
 
 使用方法:
-    # 首次运行（会打开浏览器窗口供你手动登录）
+    # 首次运行（打开浏览器窗口手动登录）
     python scraper.py --group-url "https://www.facebook.com/groups/603696475392327" --login
 
     # 后续运行（使用已保存的 cookie）
     python scraper.py --group-url "https://www.facebook.com/groups/603696475392327"
 
-    # 断点续抓（从上次 checkpoint 继续）
+    # 断点续抓
     python scraper.py --group-url "https://www.facebook.com/groups/603696475392327" --resume
 
-    # 指定抓取数量
-    python scraper.py --group-url "https://www.facebook.com/groups/603696475392327" --max-posts 500
+    # 指定数量 + 输出路径
+    python scraper.py --group-url "https://www.facebook.com/groups/603696475392327" --max-posts 800 -o data.json
+
+    # 仅验证已有数据
+    python scraper.py --validate-only data.json
 
 依赖:
     pip install playwright
@@ -29,15 +36,15 @@ Facebook 群组数据采集工具 (Playwright)
 import argparse
 import json
 import os
+import random
 import re
 import sys
 import time
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
 
 try:
-    from playwright.sync_api import sync_playwright, Page, BrowserContext, TimeoutError as PwTimeout
+    from playwright.sync_api import sync_playwright, Page, BrowserContext
 except ImportError:
     print("请先安装 Playwright: pip install playwright && playwright install chromium")
     sys.exit(1)
@@ -47,11 +54,286 @@ except ImportError:
 
 COOKIE_FILE = "fb_cookies.json"
 CHECKPOINT_DIR = "scraper_checkpoints"
-SCROLL_PAUSE = 2.0        # 每次滚动后等待秒数
-COMMENT_LOAD_PAUSE = 1.5  # 展开评论后等待秒数
-CHECKPOINT_EVERY = 50     # 每 N 条帖子保存一次 checkpoint
-MAX_SCROLL_RETRIES = 5    # 连续无新内容时的最大重试次数
-MAX_COMMENT_PAGES = 20    # 单个帖子最多展开评论的次数
+CHECKPOINT_EVERY = 50          # 每 N 条新帖子保存一次 checkpoint
+DOM_CLEANUP_EVERY = 30         # 每 N 次滚动清理一次 DOM
+
+# 拟人滚动参数（与篡改猴脚本一致）
+SCROLL_DELAY_MIN = 0.5
+SCROLL_DELAY_MAX = 1.0
+SCROLL_STEP_MIN = 900
+SCROLL_STEP_MAX = 1600
+PAUSE_EVERY_N = 150            # 每 N 次滚动暂停
+PAUSE_DURATION_MIN = 3.0
+PAUSE_DURATION_MAX = 8.0
+MICRO_PAUSE_CHANCE = 0.03
+MICRO_PAUSE_MIN = 0.5
+MICRO_PAUSE_MAX = 1.5
+MAX_NO_NEW_RETRIES = 25        # 连续无新内容后的恢复尝试次数
+
+
+# ── 注入浏览器的 JS 提取逻辑 ─────────────────────────────────────
+# 直接移植自篡改猴脚本，保证 DOM 选择器完全一致
+
+JS_EXTRACT_POSTS = """
+() => {
+    const processedIds = new Set(window.__processedPostIds || []);
+    const results = [];
+
+    function simpleHash(str) {
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) {
+            const c = str.charCodeAt(i);
+            hash = ((hash << 5) - hash) + c;
+            hash |= 0;
+        }
+        return Math.abs(hash).toString(36);
+    }
+
+    // ── 评论提取（与篡改猴 extractComments 一致）──
+    function extractComments(child) {
+        const comments = [];
+        const commentEls = child.querySelectorAll('div[role="article"]');
+        commentEls.forEach((cmt) => {
+            try {
+                let cmtAuthor = "Unknown";
+                let cmtText = "";
+                let cmtDate = "";
+
+                for (const link of cmt.querySelectorAll("a")) {
+                    const t = link.textContent.trim();
+                    if (t.length < 2 || t.length > 80) continue;
+                    if (/^\\d+\\s*(小時|分鐘|天|週|月|年|h|d|w|m)/i.test(t)) { cmtDate = t; continue; }
+                    if (/^(讚|回覆|Reply|Like|查看|顯示|See)/i.test(t)) continue;
+                    if (cmtAuthor === "Unknown") cmtAuthor = t;
+                }
+
+                const textBlock = cmt.querySelector('div[dir="auto"]');
+                if (textBlock) {
+                    const t = textBlock.textContent.trim();
+                    if (t.length >= 2 && !/^(讚|回覆|Reply|Like|查看更多|顯示更多|See more|翻譯年糕)$/i.test(t)) {
+                        cmtText = t;
+                    }
+                }
+                if (cmtText.length < 2) return;
+                comments.push({
+                    author: cmtAuthor,
+                    text: cmtText.substring(0, 3000),
+                    date: cmtDate,
+                    reactions: 0,
+                });
+            } catch (e) { /* skip */ }
+        });
+        return comments;
+    }
+
+    const feed = document.querySelector('div[role="feed"]');
+    if (!feed) return { posts: [], processedIds: [] };
+
+    const children = feed.children;
+    for (let i = children.length - 1; i >= 0; i--) {
+        const child = children[i];
+        if (child.dataset.cleaned === "1") continue;
+
+        try {
+            // ── 必须有作者 heading 才是帖子 ──
+            const heading = child.querySelector("h2, h3, h4");
+            if (!heading) continue;
+            const headingText = heading.textContent.trim();
+            if (headingText.length < 2 || /^(最相關|新貼文|Most Relevant|New Posts|熱門貼文|Top Posts)$/i.test(headingText)) continue;
+
+            // ── 帖子唯一 ID ──
+            let postUrl = "";
+            let postId = "";
+            const postsLink = child.querySelector('a[href*="/posts/"], a[href*="/permalink/"]');
+            if (postsLink) {
+                postUrl = postsLink.href.split("?")[0];
+                const idMatch = postUrl.match(/\\/(\\d{10,})\\/?$/);
+                if (idMatch) postId = idMatch[1];
+            }
+            if (!postId) {
+                const photoLink = child.querySelector('a[href*="pcb."]');
+                if (photoLink) {
+                    const pcbMatch = photoLink.href.match(/pcb\\.(\\d{10,})/);
+                    if (pcbMatch) {
+                        postId = pcbMatch[1];
+                        const groupPath = window.location.pathname.replace(/\\/$/, "");
+                        postUrl = "https://www.facebook.com" + groupPath + "/posts/" + postId + "/";
+                    }
+                }
+            }
+            if (!postId) {
+                const fbidLink = child.querySelector('a[href*="fbid="]');
+                if (fbidLink) {
+                    const fbidMatch = fbidLink.href.match(/fbid=(\\d{10,})/);
+                    if (fbidMatch) {
+                        postId = "fbid_" + fbidMatch[1];
+                        postUrl = "https://www.facebook.com/photo/?fbid=" + fbidMatch[1];
+                    }
+                }
+            }
+            if (!postId) {
+                const rawText = child.textContent.trim().substring(0, 100);
+                postId = "hash_" + simpleHash(headingText + rawText);
+                postUrl = "no_url_" + postId;
+            }
+
+            // 去重
+            if (processedIds.has(postId)) continue;
+
+            // ── 作者 ──
+            let author = headingText
+                .replace(/\\s*·\\s*追蹤.*$/s, "")
+                .replace(/\\s*·\\s*[Ff]ollow.*$/s, "")
+                .replace(/最常發言的成員.*$/s, "")
+                .replace(/Top contributor.*$/is, "")
+                .replace(/管理員.*$/s, "")
+                .replace(/Admin.*$/is, "")
+                .replace(/\\s*·\\s*Sponsored.*$/is, "")
+                .trim();
+            if (author.length === 0 || author.length >= 80) author = "Unknown";
+
+            // ── 正文 ──
+            const textSet = new Set();
+            const textParts = [];
+            child.querySelectorAll('div[dir="auto"]').forEach((block) => {
+                let inArticle = false;
+                let p = block.parentElement;
+                while (p && p !== child) {
+                    if (p.getAttribute("role") === "article") { inArticle = true; break; }
+                    p = p.parentElement;
+                }
+                if (inArticle) return;
+                const t = block.textContent.trim();
+                if (t.length < 3) return;
+                if (/^(讚|留言|分享|Like|Comment|Share|最相關|所有留言|查看更多|顯示更多|See more|Most relevant|回覆|Reply|撰寫回應|撰寫留言|Write a comment|翻譯年糕)$/i.test(t)) return;
+                const key = t.substring(0, 80);
+                if (!textSet.has(key)) {
+                    textSet.add(key);
+                    textParts.push(t);
+                }
+            });
+            let text = textParts.join("\\n").trim();
+            if (text.length === 0 && !child.querySelector('img[src*="scontent"], video')) continue;
+
+            // ── 反应数 + 评论数 + 分享数 ──
+            let reactions = 0, commentCount = 0, shareCount = 0;
+            child.querySelectorAll("[aria-label]").forEach((el) => {
+                let inArt = false;
+                let p = el.parentElement;
+                while (p && p !== child) {
+                    if (p.getAttribute("role") === "article") { inArt = true; break; }
+                    p = p.parentElement;
+                }
+                if (inArt) return;
+                const label = el.getAttribute("aria-label") || "";
+                if (label.length > 80) return;
+                const zhMatches = label.matchAll(/(讚|大心|哈哈|加油|嗚嗚|怒)[：:]\\s*(\\d+)\\s*人?/g);
+                for (const m of zhMatches) reactions += parseInt(m[2]);
+                const enMatch = label.match(/(\\d+)\\s*(likes?|reactions?|people reacted)/i);
+                if (enMatch) reactions = Math.max(reactions, parseInt(enMatch[1]));
+                if (commentCount === 0) {
+                    const cm = label.match(/(\\d+)\\s*(則留言|comments?|則回應)/i);
+                    if (cm) commentCount = parseInt(cm[1]);
+                }
+                if (shareCount === 0) {
+                    const sh = label.match(/(\\d+)\\s*(次分享|shares?)/i);
+                    if (sh) shareCount = parseInt(sh[1]);
+                }
+            });
+            if (commentCount === 0 || shareCount === 0) {
+                child.querySelectorAll("span, a").forEach((el) => {
+                    if (commentCount > 0 && shareCount > 0) return;
+                    let inArt = false;
+                    let p = el.parentElement;
+                    while (p && p !== child) {
+                        if (p.getAttribute("role") === "article") { inArt = true; break; }
+                        p = p.parentElement;
+                    }
+                    if (inArt) return;
+                    const t = el.textContent.trim();
+                    if (t.length > 25 || t.length < 2) return;
+                    if (commentCount === 0) {
+                        const cm = t.match(/^(\\d+)\\s*(則留言|comments?|則回應|条评论)$/i);
+                        if (cm) commentCount = parseInt(cm[1]);
+                    }
+                    if (shareCount === 0) {
+                        const sh = t.match(/^(\\d+)\\s*(次分享|shares?|次轉發)$/i);
+                        if (sh) shareCount = parseInt(sh[1]);
+                    }
+                });
+            }
+
+            // ── 图片/视频 ──
+            const hasImage = child.querySelector('img[src*="scontent"]') !== null;
+            const hasVideo = child.querySelector("video") !== null;
+
+            // ── 评论 ──
+            const comments = extractComments(child);
+
+            processedIds.add(postId);
+            results.push({
+                author, text: text.substring(0, 5000), date: "", post_url: postUrl, post_id: postId,
+                reactions, comment_count: commentCount, share_count: shareCount,
+                has_image: hasImage, has_video: hasVideo, text_length: text.length,
+                comments, visible_comment_count: comments.length,
+                extracted_at: new Date().toISOString(),
+            });
+        } catch (e) { /* skip */ }
+    }
+
+    // 保存已处理 ID 到全局变量
+    window.__processedPostIds = Array.from(processedIds);
+    return { posts: results, processedIds: window.__processedPostIds };
+}
+"""
+
+JS_EXPAND_SEE_MORE = """
+() => {
+    const feed = document.querySelector('div[role="feed"]');
+    if (!feed) return 0;
+    let expanded = 0;
+    feed.querySelectorAll('div[role="button"], span[role="button"]').forEach((el) => {
+        const txt = el.textContent.trim().toLowerCase();
+        if (txt === "see more" || txt === "查看更多" || txt === "顯示更多" ||
+            txt === "もっと見る" || txt === "더 보기" || txt === "voir plus") {
+            el.click();
+            expanded++;
+        }
+    });
+    return expanded;
+}
+"""
+
+JS_CLEANUP_DOM = """
+() => {
+    const feed = document.querySelector('div[role="feed"]');
+    if (!feed) return 0;
+    const viewportTop = window.scrollY;
+    let cleaned = 0;
+    for (let i = 0; i < feed.children.length; i++) {
+        const child = feed.children[i];
+        const rect = child.getBoundingClientRect();
+        if (rect.bottom > -3000) continue;
+        const h = child.offsetHeight;
+        const placeholder = document.createElement("div");
+        placeholder.style.height = h + "px";
+        placeholder.dataset.cleaned = "1";
+        feed.replaceChild(placeholder, child);
+        cleaned++;
+        i--;
+    }
+    return cleaned;
+}
+"""
+
+JS_CHECK_LOADING = """
+() => {
+    const feed = document.querySelector('div[role="feed"]');
+    const hasSpinner = !!(feed && feed.querySelector('[role="progressbar"]'));
+    const atBottom = (window.innerHeight + window.scrollY) >= (document.body.scrollHeight - 500);
+    return { hasSpinner, atBottom };
+}
+"""
 
 
 # ── Cookie 管理 ──────────────────────────────────────────────────
@@ -60,7 +342,7 @@ def save_cookies(context: BrowserContext, path: str):
     cookies = context.cookies()
     with open(path, "w", encoding="utf-8") as f:
         json.dump(cookies, f, ensure_ascii=False, indent=2)
-    print(f"  Cookie 已保存到 {path} ({len(cookies)} 条)")
+    print(f"  Cookie 已保存 ({len(cookies)} 条)")
 
 
 def load_cookies(context: BrowserContext, path: str) -> bool:
@@ -80,22 +362,20 @@ def _checkpoint_path(group_id: str) -> str:
     return os.path.join(CHECKPOINT_DIR, f"checkpoint_{group_id}.json")
 
 
-def save_checkpoint(group_id: str, posts: list, scroll_position: int, group_info: dict):
+def save_checkpoint(group_id: str, posts: list, group_info: dict):
     path = _checkpoint_path(group_id)
     data = {
         "group_id": group_id,
         "group_info": group_info,
-        "scroll_position": scroll_position,
         "posts": posts,
         "saved_at": datetime.now().isoformat(),
         "total_posts": len(posts),
     }
-    # 写入临时文件后重命名，防止写入中断导致数据损坏
     tmp_path = path + ".tmp"
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     os.replace(tmp_path, path)
-    print(f"  ✓ Checkpoint 已保存: {len(posts)} 条帖子")
+    print(f"  [checkpoint] 已保存: {len(posts)} 条帖子")
 
 
 def load_checkpoint(group_id: str) -> Optional[dict]:
@@ -112,13 +392,11 @@ def clear_checkpoint(group_id: str):
     path = _checkpoint_path(group_id)
     if os.path.exists(path):
         os.remove(path)
-        print("  Checkpoint 已清理")
 
 
 # ── 工具函数 ──────────────────────────────────────────────────────
 
 def extract_group_id(url: str) -> str:
-    """从群组 URL 提取 ID 或名称。"""
     url = url.rstrip("/")
     match = re.search(r"/groups/([^/?#]+)", url)
     if match:
@@ -126,59 +404,30 @@ def extract_group_id(url: str) -> str:
     raise ValueError(f"无法从 URL 提取群组 ID: {url}")
 
 
-def extract_post_id(element, page: Page) -> Optional[str]:
-    """尝试从帖子元素提取唯一 ID。"""
-    try:
-        # 尝试从帖子链接提取 post ID
-        link = element.query_selector('a[href*="/posts/"], a[href*="permalink"]')
-        if link:
-            href = link.get_attribute("href") or ""
-            match = re.search(r"/posts/(\d+)", href)
-            if match:
-                return match.group(1)
-            match = re.search(r"permalink/(\d+)", href)
-            if match:
-                return match.group(1)
-    except Exception:
-        pass
-
-    # 回退：使用帖子文本的 hash
-    try:
-        text = element.inner_text()[:200]
-        import hashlib
-        return "hash_" + hashlib.md5(text.encode()).hexdigest()[:12]
-    except Exception:
-        return None
+def rand_delay(lo: float, hi: float):
+    time.sleep(random.uniform(lo, hi))
 
 
 # ── 核心采集逻辑 ──────────────────────────────────────────────────
 
 def login_interactive(page: Page, context: BrowserContext):
-    """打开 Facebook 登录页面，等待用户手动登录。"""
     print("\n=== 手动登录模式 ===")
     print("浏览器已打开 Facebook 登录页面，请手动登录。")
     print("登录成功后（看到新闻动态），按 Enter 继续...")
-
     page.goto("https://www.facebook.com/login", wait_until="domcontentloaded")
-    input()  # 等待用户按 Enter
-
-    # 验证登录状态
+    input()
     if "login" in page.url.lower():
-        print("警告: 似乎尚未登录成功，请确认后再次运行。")
+        print("似乎尚未登录成功，请确认后再次运行。")
         sys.exit(1)
-
     save_cookies(context, COOKIE_FILE)
     print("登录成功！\n")
 
 
 def dismiss_popups(page: Page):
-    """关闭 Facebook 常见弹窗。"""
     selectors = [
-        # Cookie 同意弹窗
         'button[data-cookiebanner="accept_button"]',
         'button[title="Allow all cookies"]',
         'button[title="允许所有 Cookie"]',
-        # 通知弹窗
         'div[role="dialog"] button:has-text("Not Now")',
         'div[role="dialog"] button:has-text("以后再说")',
         'div[role="dialog"] button:has-text("暂不")',
@@ -194,13 +443,7 @@ def dismiss_popups(page: Page):
 
 
 def get_group_name(page: Page) -> str:
-    """获取群组名称。"""
-    selectors = [
-        'h1 a span',
-        'h1 span',
-        'div[role="main"] h1',
-    ]
-    for sel in selectors:
+    for sel in ['h1 a span', 'h1 span', 'div[role="main"] h1']:
         try:
             el = page.query_selector(sel)
             if el:
@@ -212,228 +455,6 @@ def get_group_name(page: Page) -> str:
     return "Unknown Group"
 
 
-def scrape_post_comments(page: Page, post_element) -> list:
-    """采集单个帖子的所有评论。"""
-    comments = []
-
-    # 尝试展开"查看更多评论"
-    for _ in range(MAX_COMMENT_PAGES):
-        try:
-            more_btn = post_element.query_selector(
-                'div[role="button"]:has-text("View more comments"), '
-                'div[role="button"]:has-text("查看更多评论"), '
-                'span:has-text("View more comments"), '
-                'span:has-text("previous comments")'
-            )
-            if more_btn and more_btn.is_visible():
-                more_btn.click()
-                time.sleep(COMMENT_LOAD_PAUSE)
-            else:
-                break
-        except Exception:
-            break
-
-    # 也展开"查看更多回复"
-    try:
-        reply_buttons = post_element.query_selector_all(
-            'div[role="button"]:has-text("replies"), '
-            'div[role="button"]:has-text("条回复")'
-        )
-        for btn in reply_buttons[:10]:  # 限制展开数量
-            try:
-                if btn.is_visible():
-                    btn.click()
-                    time.sleep(0.5)
-            except Exception:
-                pass
-    except Exception:
-        pass
-
-    # 提取评论
-    try:
-        comment_elements = post_element.query_selector_all(
-            'div[role="article"] div[role="article"]'
-        )
-        # 回退选择器
-        if not comment_elements:
-            comment_elements = post_element.query_selector_all(
-                'ul li div[data-testid="UFI2Comment/root_depth_0"]'
-            )
-
-        for ce in comment_elements:
-            try:
-                # 展开"查看更多"截断的评论
-                see_more = ce.query_selector('div[role="button"]:has-text("See more"), div[role="button"]:has-text("查看更多")')
-                if see_more and see_more.is_visible():
-                    see_more.click()
-                    time.sleep(0.3)
-
-                text_el = ce.query_selector('div[dir="auto"]')
-                text = text_el.inner_text().strip() if text_el else ""
-
-                author_el = ce.query_selector('a[role="link"] span')
-                author = author_el.inner_text().strip() if author_el else "Unknown"
-
-                if text:
-                    comments.append({
-                        "author": author,
-                        "text": text,
-                    })
-            except Exception:
-                continue
-    except Exception:
-        pass
-
-    return comments
-
-
-def scrape_posts(page: Page, max_posts: int, existing_post_ids: set) -> list:
-    """滚动页面并采集帖子。"""
-    posts = []
-    no_new_count = 0
-    last_post_count = 0
-
-    while len(posts) < max_posts:
-        # 获取页面上所有帖子容器
-        post_elements = page.query_selector_all('div[role="article"]')
-
-        # 过滤：只处理顶层帖子（非嵌套评论）
-        top_level_posts = []
-        for el in post_elements:
-            try:
-                # 顶层帖子通常有 data-pagelet 或在 feed 容器内
-                parent = el.evaluate('el => el.parentElement?.closest(\'div[role="article"]\')')
-                if not parent:
-                    top_level_posts.append(el)
-            except Exception:
-                top_level_posts.append(el)
-
-        new_posts_found = 0
-        for post_el in top_level_posts:
-            if len(posts) >= max_posts:
-                break
-
-            post_id = extract_post_id(post_el, page)
-            if not post_id or post_id in existing_post_ids:
-                continue
-
-            existing_post_ids.add(post_id)
-            new_posts_found += 1
-
-            try:
-                # 展开"查看更多"
-                see_more = post_el.query_selector(
-                    'div[role="button"]:has-text("See more"), '
-                    'div[role="button"]:has-text("查看更多")'
-                )
-                if see_more and see_more.is_visible():
-                    see_more.click()
-                    time.sleep(0.3)
-
-                # 提取帖子文本
-                text_divs = post_el.query_selector_all('div[dir="auto"][data-ad-preview="message"], div[data-ad-comet-preview="message"]')
-                if not text_divs:
-                    text_divs = post_el.query_selector_all('div[dir="auto"]')
-
-                text = ""
-                for td in text_divs[:3]:
-                    t = td.inner_text().strip()
-                    if len(t) > len(text):
-                        text = t
-
-                # 提取作者
-                author_el = post_el.query_selector('a[role="link"] strong, h3 a span, h4 a span')
-                author = author_el.inner_text().strip() if author_el else "Unknown"
-
-                # 提取互动数据
-                reactions = 0
-                comment_count = 0
-                try:
-                    reaction_el = post_el.query_selector(
-                        'span[role="toolbar"] span, '
-                        'div[aria-label*="reaction"], div[aria-label*="个人觉得"]'
-                    )
-                    if reaction_el:
-                        r_text = reaction_el.inner_text().strip()
-                        nums = re.findall(r'[\d,]+', r_text.replace(",", ""))
-                        if nums:
-                            reactions = int(nums[0])
-                except Exception:
-                    pass
-
-                try:
-                    comment_count_el = post_el.query_selector(
-                        'span:has-text("comment"), span:has-text("条评论")'
-                    )
-                    if comment_count_el:
-                        c_text = comment_count_el.inner_text().strip()
-                        nums = re.findall(r'\d+', c_text)
-                        if nums:
-                            comment_count = int(nums[0])
-                except Exception:
-                    pass
-
-                # 检测媒体
-                has_image = bool(post_el.query_selector('img[src*="scontent"], img[data-visualcompletion]'))
-                has_video = bool(post_el.query_selector('video, div[data-video-id]'))
-
-                # 采集评论
-                comments = scrape_post_comments(page, post_el)
-
-                post_data = {
-                    "post_id": post_id,
-                    "author": author,
-                    "text": text,
-                    "reactions": reactions,
-                    "comment_count": max(comment_count, len(comments)),
-                    "has_image": has_image,
-                    "has_video": has_video,
-                    "comments": comments,
-                }
-
-                posts.append(post_data)
-                print(f"  [{len(posts)}/{max_posts}] {author}: {text[:60]}... ({len(comments)} 评论)")
-
-            except Exception as e:
-                print(f"  跳过帖子 {post_id}: {e}")
-                continue
-
-        # 检查是否有新帖子
-        if len(posts) == last_post_count:
-            no_new_count += 1
-            if no_new_count >= MAX_SCROLL_RETRIES:
-                print(f"\n连续 {MAX_SCROLL_RETRIES} 次滚动无新内容，采集结束。")
-                break
-        else:
-            no_new_count = 0
-            last_post_count = len(posts)
-
-        # Checkpoint
-        if len(posts) > 0 and len(posts) % CHECKPOINT_EVERY == 0:
-            yield posts  # 通过 generator 通知调用方保存 checkpoint
-
-        # 滚动加载更多
-        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-        time.sleep(SCROLL_PAUSE)
-
-        # 清理 DOM 节点（防内存膨胀）— 移除已处理的、视口之上的帖子
-        page.evaluate("""
-            () => {
-                const articles = document.querySelectorAll('div[role="article"]');
-                const threshold = window.scrollY - 2000;
-                let removed = 0;
-                for (const el of articles) {
-                    if (el.getBoundingClientRect().bottom + window.scrollY < threshold && removed < 20) {
-                        el.remove();
-                        removed++;
-                    }
-                }
-            }
-        """)
-
-    yield posts  # 最终结果
-
-
 def run_scraper(args):
     """主采集流程。"""
     group_id = extract_group_id(args.group_url)
@@ -441,18 +462,14 @@ def run_scraper(args):
 
     # 加载 checkpoint
     existing_posts = []
-    existing_post_ids = set()
-    scroll_position = 0
+    existing_ids = set()
 
     if args.resume:
         cp = load_checkpoint(group_id)
         if cp:
             existing_posts = cp["posts"]
-            existing_post_ids = {p["post_id"] for p in existing_posts}
-            scroll_position = cp.get("scroll_position", 0)
+            existing_ids = {p["post_id"] for p in existing_posts}
             print(f"  从 checkpoint 恢复: 已有 {len(existing_posts)} 条帖子")
-        else:
-            print("  未找到 checkpoint，从头开始。")
 
     remaining = args.max_posts - len(existing_posts)
     if remaining <= 0:
@@ -464,7 +481,7 @@ def run_scraper(args):
 
     with sync_playwright() as p:
         browser = p.chromium.launch(
-            headless=not args.login,  # 登录模式用有头浏览器
+            headless=not args.login,
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--disable-dev-shm-usage",
@@ -480,24 +497,20 @@ def run_scraper(args):
             ),
             locale="en-US",
         )
-
         page = context.new_page()
 
-        # 登录 / 加载 cookie
+        # 登录
         if args.login:
             login_interactive(page, context)
-        else:
-            if not load_cookies(context, COOKIE_FILE):
-                print("未找到 Cookie 文件。请先用 --login 参数登录。")
-                browser.close()
-                sys.exit(1)
+        elif not load_cookies(context, COOKIE_FILE):
+            print("未找到 Cookie 文件。请先用 --login 参数登录。")
+            browser.close()
+            sys.exit(1)
 
-        # 进入群组页面
-        print(f"正在打开群组: {group_url}")
+        # 进入群组
+        print(f"正在打开群组...")
         page.goto(group_url, wait_until="domcontentloaded", timeout=60000)
         time.sleep(3)
-
-        # 验证登录状态
         if "login" in page.url.lower():
             print("Cookie 已过期，请重新使用 --login 登录。")
             browser.close()
@@ -506,87 +519,207 @@ def run_scraper(args):
         dismiss_popups(page)
         time.sleep(1)
 
-        # 获取群组信息
         group_name = get_group_name(page)
-        group_info = {
-            "group_name": group_name,
-            "group_url": group_url,
-        }
+        group_info = {"group_name": group_name, "group_url": group_url}
         print(f"  群组名称: {group_name}")
 
-        # 如果有 checkpoint，恢复滚动位置
-        if scroll_position > 0:
-            print(f"  恢复滚动位置: {scroll_position}px")
-            page.evaluate(f"window.scrollTo(0, {scroll_position})")
-            time.sleep(2)
+        # 将已有 ID 注入浏览器，避免重复提取
+        if existing_ids:
+            page.evaluate(f"window.__processedPostIds = {json.dumps(list(existing_ids))}")
 
-        # 开始采集
+        # ── 主循环（移植篡改猴 startAutoScroll 逻辑）──
         all_posts = list(existing_posts)
-        for posts_snapshot in scrape_posts(page, remaining, existing_post_ids):
-            all_posts = existing_posts + posts_snapshot
-            scroll_pos = page.evaluate("window.scrollY")
-            save_checkpoint(group_id, all_posts, scroll_pos, group_info)
+        scroll_count = 0
+        no_new_count = 0
+        last_checkpoint_count = len(existing_posts)
+        total_dom_cleaned = 0
 
-        # 更新 cookie（可能已刷新）
+        while len(all_posts) < args.max_posts:
+            # 展开"See more"（每 10 次滚动一次）
+            if scroll_count % 10 == 0:
+                try:
+                    page.evaluate(JS_EXPAND_SEE_MORE)
+                except Exception:
+                    pass
+
+            # DOM 瘦身（每 30 次滚动一次）
+            if scroll_count % DOM_CLEANUP_EVERY == 0 and len(all_posts) > 20:
+                try:
+                    cleaned = page.evaluate(JS_CLEANUP_DOM)
+                    if cleaned > 0:
+                        total_dom_cleaned += cleaned
+                        print(f"  [cleanup] 清理 {cleaned} 个 DOM 元素 (累计 {total_dom_cleaned})")
+                except Exception:
+                    pass
+
+            # 提取帖子（每 3 次滚动一次，与篡改猴一致）
+            new_found = 0
+            if scroll_count % 3 == 0:
+                try:
+                    result = page.evaluate(JS_EXTRACT_POSTS)
+                    new_posts = result.get("posts", [])
+                    if new_posts:
+                        all_posts.extend(new_posts)
+                        new_found = len(new_posts)
+                        print(f"  +{new_found} 新帖 (总计 {len(all_posts)}/{args.max_posts})")
+                except Exception as e:
+                    print(f"  提取出错: {e}")
+
+            # 滚动
+            step = random.randint(SCROLL_STEP_MIN, SCROLL_STEP_MAX)
+            page.evaluate(f'window.scrollBy({{top: {step}, behavior: "instant"}})')
+            scroll_count += 1
+
+            # 无新内容检测（与篡改猴逻辑一致）
+            if new_found == 0 and scroll_count % 3 == 0:
+                loading = page.evaluate(JS_CHECK_LOADING)
+                if loading.get("hasSpinner") and not loading.get("atBottom"):
+                    no_new_count += 1
+                    if no_new_count % 10 == 0 and no_new_count > 0:
+                        print(f"  页面加载中... 等待 ({no_new_count}次)")
+                    rand_delay(1.0, 2.0)
+                    if no_new_count >= 80:
+                        print(f"  等待过久，尝试刺激加载...")
+                        page.evaluate("window.scrollBy({top: -500, behavior: 'instant'})")
+                        time.sleep(2)
+                        page.evaluate("window.scrollBy({top: 1500, behavior: 'instant'})")
+                        time.sleep(5)
+                        no_new_count = 50
+                else:
+                    no_new_count += 1
+                    if no_new_count >= MAX_NO_NEW_RETRIES:
+                        # 策略1: 大幅滚动
+                        print(f"  连续 {no_new_count} 次无新内容，尝试恢复...")
+                        page.evaluate("window.scrollBy({top: 5000, behavior: 'instant'})")
+                        rand_delay(5.0, 8.0)
+                        result = page.evaluate(JS_EXTRACT_POSTS)
+                        recovered = result.get("posts", [])
+
+                        if not recovered:
+                            # 策略2: 滚到底部
+                            print(f"  策略2: 滚到页面底部...")
+                            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                            rand_delay(6.0, 10.0)
+                            result = page.evaluate(JS_EXTRACT_POSTS)
+                            recovered = result.get("posts", [])
+
+                        if not recovered:
+                            # 策略3: 回顶部再下来
+                            print(f"  策略3: 滚回顶部再下来...")
+                            current_pos = page.evaluate("window.scrollY")
+                            page.evaluate("window.scrollTo(0, 0)")
+                            rand_delay(2.0, 4.0)
+                            page.evaluate(f"window.scrollTo(0, {current_pos})")
+                            rand_delay(5.0, 8.0)
+                            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                            rand_delay(6.0, 10.0)
+                            result = page.evaluate(JS_EXTRACT_POSTS)
+                            recovered = result.get("posts", [])
+
+                        if not recovered:
+                            # 最终确认
+                            print(f"  最后等待 15 秒...")
+                            time.sleep(15)
+                            page.evaluate("window.scrollBy({top: 3000, behavior: 'instant'})")
+                            time.sleep(5)
+                            result = page.evaluate(JS_EXTRACT_POSTS)
+                            recovered = result.get("posts", [])
+
+                        if recovered:
+                            all_posts.extend(recovered)
+                            no_new_count = 0
+                            print(f"  恢复加载！+{len(recovered)} 帖子 (总计 {len(all_posts)})")
+                        else:
+                            print(f"  确认到底，共采集 {len(all_posts)} 条帖子")
+                            break
+            elif new_found > 0:
+                no_new_count = 0
+
+            # Checkpoint
+            if len(all_posts) - last_checkpoint_count >= CHECKPOINT_EVERY:
+                save_checkpoint(group_id, all_posts, group_info)
+                last_checkpoint_count = len(all_posts)
+
+            # 拟人暂停
+            if scroll_count % PAUSE_EVERY_N == 0:
+                pause = random.uniform(PAUSE_DURATION_MIN, PAUSE_DURATION_MAX)
+                print(f"  [pause] 第 {scroll_count} 次滚动，暂停 {pause:.0f}s... ({len(all_posts)} 条)")
+                time.sleep(pause)
+
+            if random.random() < MICRO_PAUSE_CHANCE:
+                rand_delay(MICRO_PAUSE_MIN, MICRO_PAUSE_MAX)
+
+            rand_delay(SCROLL_DELAY_MIN, SCROLL_DELAY_MAX)
+
+        # 最终保存
+        save_checkpoint(group_id, all_posts, group_info)
         save_cookies(context, COOKIE_FILE)
         browser.close()
 
     return all_posts, group_info
 
 
+# ── 输出构建（兼容 analyze.py + 保留篡改猴全部字段）────────────────
+
 def build_output(posts: list, group_info: dict) -> dict:
-    """构建与 analyze.py 兼容的 JSON 输出。"""
+    # 按 reactions 降序排序 + 添加 index（与篡改猴 buildExportData 一致）
+    posts_sorted = sorted(posts, key=lambda p: p.get("reactions", 0), reverse=True)
+    for i, p in enumerate(posts_sorted):
+        p["index"] = i + 1
+
     comments_flat = []
-    for post in posts:
-        for comment in post.get("comments", []):
+    for p in posts_sorted:
+        for ci, c in enumerate(p.get("comments", [])):
             comments_flat.append({
-                "post_id": post["post_id"],
-                "author": comment.get("author", "Unknown"),
-                "text": comment.get("text", ""),
+                **c,
+                "post_url": p.get("post_url", ""),
+                "post_index": p["index"],
+                "comment_index": ci + 1,
             })
 
     return {
-        "group_name": group_info.get("group_name", "Unknown"),
         "group_url": group_info.get("group_url", ""),
+        "group_name": group_info.get("group_name", "Unknown"),
         "extraction_time": datetime.now().isoformat(),
-        "total_posts": len(posts),
+        "total_posts": len(posts_sorted),
         "total_comments": len(comments_flat),
-        "posts": posts,
+        "posts": posts_sorted,
         "comments_flat": comments_flat,
     }
 
 
-def validate_output(data: dict) -> list:
-    """验证输出数据完整性，返回警告列表。"""
-    warnings = []
+# ── 数据完整性校验 ────────────────────────────────────────────────
 
+def validate_output(data: dict) -> list:
+    warnings = []
     posts = data.get("posts", [])
     if not posts:
-        warnings.append("❌ 无帖子数据")
+        warnings.append("FAIL: 无帖子数据")
         return warnings
 
-    # 检查帖子完整性
+    # 空文本帖子
     empty_text = sum(1 for p in posts if not p.get("text", "").strip())
     if empty_text > 0:
         pct = empty_text / len(posts) * 100
-        warnings.append(f"⚠ {empty_text} 条帖子 ({pct:.0f}%) 文本为空")
+        warnings.append(f"WARN: {empty_text} 条帖子 ({pct:.0f}%) 文本为空")
 
-    # 检查 post_id 唯一性
-    ids = [p["post_id"] for p in posts]
+    # post_id 唯一性
+    ids = [p.get("post_id", "") for p in posts]
     dupes = len(ids) - len(set(ids))
     if dupes > 0:
-        warnings.append(f"⚠ 发现 {dupes} 个重复 post_id")
+        warnings.append(f"WARN: 发现 {dupes} 个重复 post_id")
 
-    # 检查评论采集率
-    posts_with_comments = sum(1 for p in posts if p.get("comment_count", 0) > 0)
-    posts_with_actual_comments = sum(1 for p in posts if len(p.get("comments", [])) > 0)
-    if posts_with_comments > 0:
-        rate = posts_with_actual_comments / posts_with_comments * 100
-        warnings.append(f"ℹ 评论采集率: {rate:.0f}% ({posts_with_actual_comments}/{posts_with_comments} 有评论的帖子)")
+    # 评论采集率
+    posts_with_count = sum(1 for p in posts if p.get("comment_count", 0) > 0)
+    posts_with_actual = sum(1 for p in posts if len(p.get("comments", [])) > 0)
+    if posts_with_count > 0:
+        rate = posts_with_actual / posts_with_count * 100
+        warnings.append(f"INFO: 评论采集率 {rate:.0f}% ({posts_with_actual}/{posts_with_count})")
 
-    # 统计摘要
-    total_comments = sum(len(p.get("comments", [])) for p in posts)
-    warnings.append(f"ℹ 总计: {len(posts)} 帖子, {total_comments} 条评论")
+    # 总计
+    total_cmts = sum(len(p.get("comments", [])) for p in posts)
+    total_reactions = sum(p.get("reactions", 0) for p in posts)
+    warnings.append(f"INFO: {len(posts)} 帖子, {total_cmts} 评论, {total_reactions} 反应")
 
     return warnings
 
@@ -594,32 +727,13 @@ def validate_output(data: dict) -> list:
 # ── 入口 ──────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(description="Facebook 群组数据采集工具")
-    parser.add_argument(
-        "--group-url", required=True,
-        help="Facebook 群组 URL，例如 https://www.facebook.com/groups/603696475392327",
-    )
-    parser.add_argument(
-        "--max-posts", type=int, default=500,
-        help="最多采集帖子数 (默认 500)",
-    )
-    parser.add_argument(
-        "--output", "-o", default=None,
-        help="输出 JSON 文件路径 (默认: facebook_data_<group_id>.json)",
-    )
-    parser.add_argument(
-        "--login", action="store_true",
-        help="打开浏览器窗口手动登录 Facebook",
-    )
-    parser.add_argument(
-        "--resume", action="store_true",
-        help="从上次 checkpoint 断点续抓",
-    )
-    parser.add_argument(
-        "--validate-only", default=None,
-        help="仅验证已有 JSON 文件的数据完整性",
-    )
-
+    parser = argparse.ArgumentParser(description="Facebook 群组数据采集工具 (Playwright)")
+    parser.add_argument("--group-url", help="Facebook 群组 URL")
+    parser.add_argument("--max-posts", type=int, default=500, help="最多采集帖子数 (默认 500)")
+    parser.add_argument("--output", "-o", default=None, help="输出 JSON 文件路径")
+    parser.add_argument("--login", action="store_true", help="打开浏览器窗口手动登录")
+    parser.add_argument("--resume", action="store_true", help="从上次 checkpoint 断点续抓")
+    parser.add_argument("--validate-only", default=None, help="仅验证已有 JSON 文件的完整性")
     args = parser.parse_args()
 
     # 仅验证模式
@@ -632,9 +746,11 @@ def main():
             print(f"  {w}")
         sys.exit(0)
 
+    if not args.group_url:
+        parser.error("--group-url 是必需的（除非使用 --validate-only）")
+
     # 采集
     posts, group_info = run_scraper(args)
-
     if not posts:
         print("未采集到任何帖子。")
         sys.exit(1)
@@ -644,8 +760,7 @@ def main():
 
     # 验证
     print("\n=== 数据完整性检查 ===")
-    warnings = validate_output(output)
-    for w in warnings:
+    for w in validate_output(output):
         print(f"  {w}")
 
     # 保存
@@ -653,10 +768,9 @@ def main():
     output_path = args.output or f"facebook_data_{group_id}.json"
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(output, f, ensure_ascii=False, indent=2)
-    print(f"\n✓ 数据已保存到: {output_path}")
-    print(f"  可直接用于分析: python analyze.py {output_path}")
+    print(f"\n  数据已保存: {output_path}")
+    print(f"  可直接分析: python analyze.py {output_path}")
 
-    # 清理 checkpoint
     clear_checkpoint(group_id)
 
 
