@@ -485,7 +485,7 @@ def run_scraper(args):
     print(f"  目标: {args.max_posts} 条帖子 (已有 {len(existing_posts)}，还需 {remaining})")
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(
+        launch_opts = dict(
             headless=not args.login,
             args=[
                 "--disable-blink-features=AutomationControlled",
@@ -493,6 +493,9 @@ def run_scraper(args):
                 "--no-sandbox",
             ],
         )
+        if args.proxy:
+            launch_opts["proxy"] = {"server": args.proxy}
+        browser = p.chromium.launch(**launch_opts)
         context = browser.new_context(
             viewport={"width": 1280, "height": 900},
             user_agent=(
@@ -739,6 +742,7 @@ def main():
     parser.add_argument("--login", action="store_true", help="打开浏览器窗口手动登录")
     parser.add_argument("--resume", action="store_true", help="从上次 checkpoint 断点续抓")
     parser.add_argument("--validate-only", default=None, help="仅验证已有 JSON 文件的完整性")
+    parser.add_argument("--proxy", default=None, help="代理服务器地址 (如 http://127.0.0.1:7890 或 socks5://127.0.0.1:1080)")
     args = parser.parse_args()
 
     # 仅验证模式
