@@ -26,7 +26,8 @@ from config import (
     DATA_DIR, PER_VIDEO_DATA_DIR, REPORTS_DIR, PER_VIDEO_REPORTS_DIR,
     PUBLISHED_AFTER, SEARCH_QUERIES, KNOWN_REVIEWERS, KNOWN_REVIEWERS_H2C,
     KNOWN_CHANNEL_NAMES, KEY_INFO_PATTERNS, MIN_VIEW_COUNT, TOP_N_VIDEOS,
-    LLM_RATE_LIMIT_DELAY, VIDEO_CATEGORIES,
+    LLM_RATE_LIMIT_DELAY, LLM_MAX_ROUNDS, LLM_ROUND_WAIT_BASE,
+    VIDEO_CATEGORIES,
 )
 from youtube_api import (
     init_youtube_client, search_videos, search_known_reviewers,
@@ -560,72 +561,110 @@ def main():
     cached_llm = load_checkpoint("llm_analysis")
     llm_results = cached_llm if cached_llm else {}
 
-    for i, video in enumerate(top_videos):
-        vid = video["video_id"]
+    for round_num in range(1, LLM_MAX_ROUNDS + 1):
+        if round_num > 1:
+            logger.info(f"\n===== Step 7 第 {round_num} 轮重试 =====")
 
-        # 断点续跑：跳过已分析的（skipped 不算完成，需重新用元数据分析）
-        existing = llm_results.get(vid, {})
-        t_done = existing.get("transcript", {}).get("status") in (
-            "success", "failed")
-        c_done = existing.get("comments", {}).get("status") in (
-            "success", "no_comments", "failed")
-        if t_done and c_done:
+        round_failed = 0
+        round_attempted = 0
+
+        for i, video in enumerate(top_videos):
+            vid = video["video_id"]
+
+            # 断点续跑：只跳过已成功的（failed 不算完成，需重试）
+            existing = llm_results.get(vid, {})
+            t_done = existing.get("transcript", {}).get("status") in (
+                "success",)
+            c_done = existing.get("comments", {}).get("status") in (
+                "success", "no_comments")
+            if t_done and c_done:
+                if round_num == 1:
+                    logger.info(
+                        f"[{i+1}/{len(top_videos)}] 跳过已成功: "
+                        f"{video['channel'][:20]} - {video['title'][:40]}"
+                    )
+                continue
+
+            round_attempted += 1
             logger.info(
-                f"[{i+1}/{len(top_videos)}] 跳过已分析: "
+                f"\n[{i+1}/{len(top_videos)}] LLM 分析"
+                f"{'(重试)' if round_num > 1 else ''}: "
                 f"{video['channel'][:20]} - {video['title'][:40]}"
             )
-            continue
 
-        logger.info(
-            f"\n[{i+1}/{len(top_videos)}] LLM 分析: "
-            f"{video['channel'][:20]} - {video['title'][:40]}"
-        )
+            vid_result = llm_results.get(vid, {})
 
-        vid_result = llm_results.get(vid, {})
+            # 7a: 字幕内容分析（仅当尚未成功时）
+            if vid_result.get("transcript", {}).get("status") != "success":
+                tr = transcript_results.get(vid, {})
+                if tr.get("status") == "success" and tr.get("full_text"):
+                    transcript_analysis = analyze_transcript_with_llm(
+                        llm, video, tr["full_text"],
+                        category=video.get("category", "u1_review"),
+                    )
+                    vid_result["transcript"] = transcript_analysis
+                    logger.info(f"  字幕分析: {transcript_analysis['status']}")
+                else:
+                    logger.info(f"  字幕不可用，使用元数据+评论分析...")
+                    if len(df_meaningful) > 0:
+                        meta_comments = df_meaningful[
+                            df_meaningful["video_id"] == vid
+                        ].copy()
+                    else:
+                        meta_comments = pd.DataFrame()
+                    metadata_analysis = analyze_metadata_with_llm(
+                        llm, video, meta_comments,
+                        category=video.get("category", "u1_review"),
+                    )
+                    vid_result["transcript"] = metadata_analysis
+                    logger.info(
+                        f"  元数据分析: {metadata_analysis['status']}")
 
-        # 7a: 字幕内容分析
-        tr = transcript_results.get(vid, {})
-        if tr.get("status") == "success" and tr.get("full_text"):
-            transcript_analysis = analyze_transcript_with_llm(
-                llm, video, tr["full_text"],
-                category=video.get("category", "u1_review"),
-            )
-            vid_result["transcript"] = transcript_analysis
-            logger.info(f"  字幕分析: {transcript_analysis['status']}")
+            # 7b: 评论分析（仅当尚未成功时）
+            if vid_result.get("comments", {}).get("status") not in (
+                    "success", "no_comments"):
+                if len(df_meaningful) > 0:
+                    video_comments = df_meaningful[
+                        df_meaningful["video_id"] == vid
+                    ].copy()
+                else:
+                    video_comments = pd.DataFrame()
+
+                comment_analysis = analyze_comments_with_llm(
+                    llm, video, video_comments,
+                    category=video.get("category", "u1_review"),
+                )
+                vid_result["comments"] = comment_analysis
+                logger.info(f"  评论分析: {comment_analysis['status']}")
+
+            llm_results[vid] = vid_result
+
+            # 每个视频都保存检查点（LLM 调用较贵，不能丢）
+            save_checkpoint("llm_analysis", llm_results)
+
+            # 统计本轮失败
+            t_ok = vid_result.get("transcript", {}).get("status") == "success"
+            c_ok = vid_result.get("comments", {}).get("status") in (
+                "success", "no_comments")
+            if not (t_ok and c_ok):
+                round_failed += 1
+
+        # 本轮结束，检查是否全部成功
+        if round_failed == 0:
+            if round_num > 1:
+                logger.info(f"第 {round_num} 轮: 所有视频分析成功!")
+            break
         else:
-            logger.info(f"  字幕不可用，使用元数据+评论分析...")
-            if len(df_meaningful) > 0:
-                meta_comments = df_meaningful[
-                    df_meaningful["video_id"] == vid
-                ].copy()
-            else:
-                meta_comments = pd.DataFrame()
-            metadata_analysis = analyze_metadata_with_llm(
-                llm, video, meta_comments,
-                category=video.get("category", "u1_review"),
+            logger.warning(
+                f"第 {round_num} 轮: {round_failed}/{round_attempted} "
+                f"个视频分析失败"
             )
-            vid_result["transcript"] = metadata_analysis
-            logger.info(f"  元数据分析: {metadata_analysis['status']}")
-
-        # 7b: 评论分析
-        if len(df_meaningful) > 0:
-            video_comments = df_meaningful[
-                df_meaningful["video_id"] == vid
-            ].copy()
-        else:
-            video_comments = pd.DataFrame()
-
-        comment_analysis = analyze_comments_with_llm(
-            llm, video, video_comments,
-            category=video.get("category", "u1_review"),
-        )
-        vid_result["comments"] = comment_analysis
-        logger.info(f"  评论分析: {comment_analysis['status']}")
-
-        llm_results[vid] = vid_result
-
-        # 每个视频都保存检查点（LLM 调用较贵，不能丢）
-        save_checkpoint("llm_analysis", llm_results)
+            if round_num < LLM_MAX_ROUNDS:
+                wait = LLM_ROUND_WAIT_BASE * round_num
+                logger.info(
+                    f"等待 {wait}s 后开始第 {round_num+1} 轮重试..."
+                )
+                time.sleep(wait)
 
     transcript_count = sum(
         1 for r in llm_results.values()
@@ -637,11 +676,14 @@ def main():
         if r.get("transcript", {}).get("status") == "success"
         and r.get("transcript", {}).get("analysis_type") == "metadata"
     )
+    failed_count = len(top_videos) - transcript_count - metadata_count
     logger.info(
         f"\nLLM 分析完成: {transcript_count} 字幕分析 + "
         f"{metadata_count} 元数据分析 = "
         f"{transcript_count + metadata_count}/{len(top_videos)} 个视频"
     )
+    if failed_count > 0:
+        logger.warning(f"仍有 {failed_count} 个视频分析失败")
 
     # ===== Step 8: 生成单视频详情报告 =====
     logger.info("\nStep 8: 生成视频详情报告（中文）")

@@ -322,9 +322,11 @@ LLM_MODEL_DEEP = os.environ.get("LLM_MODEL_DEEP", "qwen3.5-plus")    # 字幕分
 LLM_MODEL_FAST = os.environ.get("LLM_MODEL_FAST", "qwen-plus")       # 评论分析、综合报告（结构化提取）
 LLM_MAX_TOKENS = 4096
 LLM_TEMPERATURE = 0.3
-LLM_RATE_LIMIT_DELAY = 1.5        # 每次调用间隔（秒）
-LLM_MAX_RETRIES = 3
-LLM_RETRY_BASE_DELAY = 2.0        # 指数退避基础延迟
+LLM_RATE_LIMIT_DELAY = 2.5        # 每次调用间隔（秒），减少限流
+LLM_MAX_RETRIES = 5               # 单次调用重试次数
+LLM_RETRY_BASE_DELAY = 3.0        # 指数退避基础延迟（秒）
+LLM_MAX_ROUNDS = 3                # Step 7 整体重试轮数
+LLM_ROUND_WAIT_BASE = 30          # 轮间等待基数（秒）
 
 # =====================================================================
 # LLM Prompt 模板 — U1 评测

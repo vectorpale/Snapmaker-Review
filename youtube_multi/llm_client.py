@@ -128,12 +128,21 @@ def _call_llm(client, prompt, max_tokens=None, model=None):
             return result
         except Exception as e:
             last_error = e
+            err_str = str(e)
             if attempt < LLM_MAX_RETRIES:
                 delay = LLM_RETRY_BASE_DELAY * (2 ** attempt)
-                logger.warning(
-                    f"LLM 调用失败, {delay}s 后重试 "
-                    f"({attempt + 1}/{LLM_MAX_RETRIES}): {e}"
-                )
+                # 速率限制错误使用更长退避
+                if "429" in err_str or "rate" in err_str.lower():
+                    delay = max(delay, 15.0)
+                    logger.warning(
+                        f"LLM 速率限制, {delay}s 后重试 "
+                        f"({attempt + 1}/{LLM_MAX_RETRIES})"
+                    )
+                else:
+                    logger.warning(
+                        f"LLM 调用失败, {delay}s 后重试 "
+                        f"({attempt + 1}/{LLM_MAX_RETRIES}): {e}"
+                    )
                 time.sleep(delay)
 
     logger.error(f"LLM 调用最终失败: {last_error}")
