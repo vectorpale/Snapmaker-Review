@@ -69,6 +69,7 @@ MICRO_PAUSE_CHANCE = 0.03
 MICRO_PAUSE_MIN = 0.5
 MICRO_PAUSE_MAX = 1.5
 MAX_NO_NEW_RETRIES = 25        # 连续无新内容后的恢复尝试次数
+MAX_RECOVERY_ROUNDS = 3        # 恢复策略最多尝试几轮
 
 
 # ── 注入浏览器的 JS 提取逻辑 ─────────────────────────────────────
@@ -596,22 +597,27 @@ def run_scraper(args):
                 else:
                     no_new_count += 1
                     if no_new_count >= MAX_NO_NEW_RETRIES:
-                        # 策略1: 大幅滚动
-                        print(f"  连续 {no_new_count} 次无新内容，尝试恢复...")
-                        page.evaluate("window.scrollBy({top: 5000, behavior: 'instant'})")
-                        rand_delay(5.0, 8.0)
-                        result = page.evaluate(JS_EXTRACT_POSTS)
-                        recovered = result.get("posts", [])
+                        recovered = []
+                        for recovery_round in range(1, MAX_RECOVERY_ROUNDS + 1):
+                            print(f"  连续 {no_new_count} 次无新内容，恢复尝试 第{recovery_round}轮...")
 
-                        if not recovered:
+                            # 策略1: 大幅滚动
+                            page.evaluate("window.scrollBy({top: 5000, behavior: 'instant'})")
+                            rand_delay(5.0, 8.0)
+                            result = page.evaluate(JS_EXTRACT_POSTS)
+                            recovered = result.get("posts", [])
+                            if recovered:
+                                break
+
                             # 策略2: 滚到底部
                             print(f"  策略2: 滚到页面底部...")
                             page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                             rand_delay(6.0, 10.0)
                             result = page.evaluate(JS_EXTRACT_POSTS)
                             recovered = result.get("posts", [])
+                            if recovered:
+                                break
 
-                        if not recovered:
                             # 策略3: 回顶部再下来
                             print(f"  策略3: 滚回顶部再下来...")
                             current_pos = page.evaluate("window.scrollY")
@@ -623,15 +629,47 @@ def run_scraper(args):
                             rand_delay(6.0, 10.0)
                             result = page.evaluate(JS_EXTRACT_POSTS)
                             recovered = result.get("posts", [])
+                            if recovered:
+                                break
 
-                        if not recovered:
-                            # 最终确认
-                            print(f"  最后等待 15 秒...")
-                            time.sleep(15)
-                            page.evaluate("window.scrollBy({top: 3000, behavior: 'instant'})")
-                            time.sleep(5)
+                            # 策略4: 点击"加载更多帖子"按钮（Facebook 有时会显示）
+                            print(f"  策略4: 尝试点击加载更多按钮...")
+                            try:
+                                clicked = page.evaluate("""() => {
+                                    const btns = document.querySelectorAll('div[role="button"], span[role="button"], a[role="button"]');
+                                    for (const btn of btns) {
+                                        const t = btn.textContent.trim().toLowerCase();
+                                        if (t.includes('see more posts') || t.includes('more posts') ||
+                                            t.includes('load more') || t.includes('查看更多帖子') ||
+                                            t.includes('顯示更多帖子') || t.includes('更多貼文') ||
+                                            t.includes('show more')) {
+                                            btn.click();
+                                            return true;
+                                        }
+                                    }
+                                    return false;
+                                }""")
+                                if clicked:
+                                    print(f"  已点击加载更多按钮")
+                                    rand_delay(8.0, 12.0)
+                                    result = page.evaluate(JS_EXTRACT_POSTS)
+                                    recovered = result.get("posts", [])
+                                    if recovered:
+                                        break
+                            except Exception:
+                                pass
+
+                            # 策略5: 长等待 + 缓慢滚动（触发 lazy load）
+                            print(f"  策略5: 长等待 {15 + recovery_round * 5}s + 缓慢滚动...")
+                            time.sleep(15 + recovery_round * 5)
+                            for _ in range(5):
+                                page.evaluate("window.scrollBy({top: 800, behavior: 'smooth'})")
+                                time.sleep(2)
+                            rand_delay(5.0, 8.0)
                             result = page.evaluate(JS_EXTRACT_POSTS)
                             recovered = result.get("posts", [])
+                            if recovered:
+                                break
 
                         if recovered:
                             all_posts.extend(recovered)
