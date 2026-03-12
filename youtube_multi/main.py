@@ -40,7 +40,7 @@ from analysis import (
 from comments import get_all_comments, clean_comment
 from llm_client import (
     init_llm_client, preflight_check_llm,
-    analyze_transcript_with_llm,
+    analyze_transcript_with_llm, analyze_metadata_with_llm,
     analyze_comments_with_llm, generate_overall_with_llm,
 )
 from reports import generate_per_video_report, generate_overall_report
@@ -563,10 +563,10 @@ def main():
     for i, video in enumerate(top_videos):
         vid = video["video_id"]
 
-        # 断点续跑：跳过已分析的（字幕 success/skipped/failed 均视为已完成）
+        # 断点续跑：跳过已分析的（skipped 不算完成，需重新用元数据分析）
         existing = llm_results.get(vid, {})
         t_done = existing.get("transcript", {}).get("status") in (
-            "success", "skipped", "failed")
+            "success", "failed")
         c_done = existing.get("comments", {}).get("status") in (
             "success", "no_comments", "failed")
         if t_done and c_done:
@@ -593,12 +593,19 @@ def main():
             vid_result["transcript"] = transcript_analysis
             logger.info(f"  字幕分析: {transcript_analysis['status']}")
         else:
-            vid_result["transcript"] = {
-                "status": "skipped",
-                "analysis_text": "",
-                "error": f"字幕不可用: {tr.get('status', 'missing')}",
-            }
-            logger.info(f"  字幕分析: 跳过（无字幕）")
+            logger.info(f"  字幕不可用，使用元数据+评论分析...")
+            if len(df_meaningful) > 0:
+                meta_comments = df_meaningful[
+                    df_meaningful["video_id"] == vid
+                ].copy()
+            else:
+                meta_comments = pd.DataFrame()
+            metadata_analysis = analyze_metadata_with_llm(
+                llm, video, meta_comments,
+                category=video.get("category", "u1_review"),
+            )
+            vid_result["transcript"] = metadata_analysis
+            logger.info(f"  元数据分析: {metadata_analysis['status']}")
 
         # 7b: 评论分析
         if len(df_meaningful) > 0:
@@ -620,12 +627,20 @@ def main():
         # 每个视频都保存检查点（LLM 调用较贵，不能丢）
         save_checkpoint("llm_analysis", llm_results)
 
-    success_count = sum(
+    transcript_count = sum(
         1 for r in llm_results.values()
         if r.get("transcript", {}).get("status") == "success"
+        and r.get("transcript", {}).get("analysis_type") != "metadata"
+    )
+    metadata_count = sum(
+        1 for r in llm_results.values()
+        if r.get("transcript", {}).get("status") == "success"
+        and r.get("transcript", {}).get("analysis_type") == "metadata"
     )
     logger.info(
-        f"\nLLM 分析完成: {success_count}/{len(top_videos)} 个视频字幕分析成功"
+        f"\nLLM 分析完成: {transcript_count} 字幕分析 + "
+        f"{metadata_count} 元数据分析 = "
+        f"{transcript_count + metadata_count}/{len(top_videos)} 个视频"
     )
 
     # ===== Step 8: 生成单视频详情报告 =====

@@ -30,6 +30,9 @@ from config import (
     PROMPT_OVERALL_REPORT_U1,
     PROMPT_OVERALL_REPORT_H2C,
     PROMPT_OVERALL_REPORT_COMPARISON,
+    PROMPT_METADATA_ANALYSIS,
+    PROMPT_METADATA_ANALYSIS_H2C,
+    PROMPT_METADATA_ANALYSIS_COMPARISON,
 )
 
 TRANSCRIPT_PROMPTS = {
@@ -48,6 +51,12 @@ OVERALL_PROMPTS = {
     "u1_review": PROMPT_OVERALL_REPORT_U1,
     "h2c_review": PROMPT_OVERALL_REPORT_H2C,
     "comparison": PROMPT_OVERALL_REPORT_COMPARISON,
+}
+
+METADATA_PROMPTS = {
+    "u1_review": PROMPT_METADATA_ANALYSIS,
+    "h2c_review": PROMPT_METADATA_ANALYSIS_H2C,
+    "comparison": PROMPT_METADATA_ANALYSIS_COMPARISON,
 }
 
 logger = logging.getLogger(__name__)
@@ -178,6 +187,77 @@ def analyze_transcript_with_llm(client, video, transcript_text, category="u1_rev
     }
 
 
+def analyze_metadata_with_llm(client, video, comments_df, category="u1_review"):
+    """
+    使用 LLM 基于元数据+评论分析无字幕视频。
+
+    参数:
+        client: OpenAI 客户端
+        video: 视频详情 dict
+        comments_df: 该视频的评论 DataFrame
+        category: 视频分类
+
+    返回: dict with status, analysis_text, analysis_type, error
+    """
+    sponsor_desc = video.get("sponsor_status", {}).get("sponsor_type", "unknown")
+    ch = video.get("channel_profile", {})
+    tags = video.get("tags", [])
+    duration_sec = video.get("duration_seconds", 0)
+    duration_str = f"{duration_sec // 60} 分 {duration_sec % 60} 秒"
+
+    # 提取前50条高赞评论
+    comments_text = "无评论数据"
+    if comments_df is not None and len(comments_df) > 0:
+        top_n = min(50, len(comments_df))
+        top_comments = comments_df.nlargest(top_n, "like_count")
+        parts = []
+        for _, row in top_comments.iterrows():
+            likes = row.get("like_count", 0)
+            author = row.get("author", "Anonymous")
+            text = row.get("text_clean", "")[:500]
+            parts.append(f"[{likes} likes] {author}: {text}")
+        comments_text = "\n\n".join(parts)
+
+    # 截断描述
+    description = video.get("description", "")
+    if len(description) > 5000:
+        description = description[:5000] + "\n[...描述已截断...]"
+
+    prompt_template = METADATA_PROMPTS.get(category, PROMPT_METADATA_ANALYSIS)
+    prompt = prompt_template.format(
+        title=video["title"],
+        channel=video["channel"],
+        view_count=video["view_count"],
+        sponsor_status=sponsor_desc,
+        duration=duration_str,
+        description=description,
+        tags=", ".join(tags) if tags else "无标签",
+        subscriber_count=f"{ch.get('subscriber_count', 0):,}",
+        channel_description=ch.get("channel_description", "N/A")[:300],
+        comments=comments_text,
+    )
+
+    logger.info(
+        f"  调用 LLM ({LLM_MODEL_FAST}) 元数据分析 "
+        f"({len(prompt):,} chars)..."
+    )
+
+    result = _call_llm(client, prompt, model=LLM_MODEL_FAST)
+    if result:
+        return {
+            "status": "success",
+            "analysis_text": result,
+            "analysis_type": "metadata",
+            "error": None,
+        }
+    return {
+        "status": "failed",
+        "analysis_text": "",
+        "analysis_type": "metadata",
+        "error": "LLM 调用失败",
+    }
+
+
 def analyze_comments_with_llm(client, video, comments_df, category="u1_review"):
     """
     使用 LLM 分析单个视频的评论。
@@ -265,9 +345,10 @@ def generate_overall_with_llm(client, llm_results, videos, category="u1_review")
         ta = result.get("transcript", {})
         ta_text = ta.get("analysis_text", "分析不可用")
         ta_excerpt = ta_text[:2000] + ("..." if len(ta_text) > 2000 else "")
+        type_label = "（基于元数据分析）" if ta.get("analysis_type") == "metadata" else ""
 
         video_parts.append(
-            f"### {video['channel']} - {video['title']}\n"
+            f"### {video['channel']} - {video['title']}{type_label}\n"
             f"观看量: {video['view_count']:,} | "
             f"赞助: {video.get('sponsor_status', {}).get('sponsor_type', 'unknown')}\n\n"
             f"{ta_excerpt}\n"

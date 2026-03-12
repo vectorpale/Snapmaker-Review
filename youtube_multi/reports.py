@@ -81,6 +81,8 @@ def generate_per_video_report(video, content_analysis, video_comments_df,
     # --- LLM 深度内容分析 ---
     r.append("## 深度内容分析（AI 分析结果）\n")
     if ta.get("status") == "success" and ta.get("analysis_text"):
+        if ta.get("analysis_type") == "metadata":
+            r.append("*注：本视频无可用字幕，以下分析基于视频标题、描述、标签和用户评论*\n")
         r.append(ta["analysis_text"])
     elif ta.get("status") == "skipped":
         r.append("*字幕不可用，无法进行内容分析*\n")
@@ -196,6 +198,20 @@ def generate_overall_report(top_videos, filter_stats, df_meaningful,
     )
     report.append(f"| 有效评论数 | {len(df_meaningful):,} |")
     report.append(f"| 成功转录视频 | {transcript_stats['success']} |")
+
+    # 统计字幕分析 vs 元数据分析
+    transcript_analyzed = sum(
+        1 for r in llm_results.values()
+        if r.get("transcript", {}).get("status") == "success"
+        and r.get("transcript", {}).get("analysis_type") != "metadata"
+    )
+    metadata_analyzed = sum(
+        1 for r in llm_results.values()
+        if r.get("transcript", {}).get("status") == "success"
+        and r.get("transcript", {}).get("analysis_type") == "metadata"
+    )
+    report.append(f"| 字幕深度分析 | {transcript_analyzed} |")
+    report.append(f"| 元数据分析（无字幕） | {metadata_analyzed} |")
     report.append("")
 
     # 2. 板块一：快造U1评测视频分析
@@ -214,7 +230,7 @@ def generate_overall_report(top_videos, filter_stats, df_meaningful,
         report.append("|---|---|---|---|---|---|")
         for i, v in enumerate(u1_videos, 1):
             sp_icon = "是" if v.get("sponsor_status", {}).get("is_sponsored") else ""
-            llm_status = "OK" if llm_results.get(v["video_id"], {}).get("transcript", {}).get("status") == "success" else "N/A"
+            llm_status = _llm_status_label(llm_results, v["video_id"])
             report.append(
                 f"| {i} | {v['channel'][:18]} | {v['title'][:35]} | "
                 f"{v['view_count']:,} | {sp_icon} | {llm_status} |"
@@ -239,7 +255,7 @@ def generate_overall_report(top_videos, filter_stats, df_meaningful,
         report.append("|---|---|---|---|---|---|")
         for i, v in enumerate(h2c_videos, 1):
             sp_icon = "是" if v.get("sponsor_status", {}).get("is_sponsored") else ""
-            llm_status = "OK" if llm_results.get(v["video_id"], {}).get("transcript", {}).get("status") == "success" else "N/A"
+            llm_status = _llm_status_label(llm_results, v["video_id"])
             report.append(
                 f"| {i} | {v['channel'][:18]} | {v['title'][:35]} | "
                 f"{v['view_count']:,} | {sp_icon} | {llm_status} |"
@@ -264,7 +280,7 @@ def generate_overall_report(top_videos, filter_stats, df_meaningful,
         report.append("|---|---|---|---|---|---|")
         for i, v in enumerate(comp_videos, 1):
             sp_icon = "是" if v.get("sponsor_status", {}).get("is_sponsored") else ""
-            llm_status = "OK" if llm_results.get(v["video_id"], {}).get("transcript", {}).get("status") == "success" else "N/A"
+            llm_status = _llm_status_label(llm_results, v["video_id"])
             report.append(
                 f"| {i} | {v['channel'][:18]} | {v['title'][:35]} | "
                 f"{v['view_count']:,} | {sp_icon} | {llm_status} |"
@@ -328,11 +344,7 @@ def generate_overall_report(top_videos, filter_stats, df_meaningful,
     )
     report.append("|---|---|---|---|---|---|---|")
     for i, v in enumerate(top_videos, 1):
-        llm_status = (
-            "OK" if llm_results.get(v["video_id"], {}).get(
-                "transcript", {}).get("status") == "success"
-            else "N/A"
-        )
+        llm_status = _llm_status_label(llm_results, v["video_id"])
         cat_label = VIDEO_CATEGORIES.get(v.get("category", "u1_review"), "未知")
         sp_icon = (
             "是" if v.get("sponsor_status", {}).get("is_sponsored") else ""
@@ -345,6 +357,16 @@ def generate_overall_report(top_videos, filter_stats, df_meaningful,
     report.append("")
 
     return "\n".join(report)
+
+
+def _llm_status_label(llm_results, video_id):
+    """返回 LLM 分析状态标签：字幕 / 元数据 / 失败"""
+    tr_result = llm_results.get(video_id, {}).get("transcript", {})
+    if tr_result.get("status") == "success":
+        if tr_result.get("analysis_type") == "metadata":
+            return "元数据"
+        return "字幕"
+    return "N/A"
 
 
 def _format_subs(subs):
