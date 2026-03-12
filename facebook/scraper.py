@@ -670,9 +670,10 @@ def run_scraper(args):
             browser.close()
             sys.exit(1)
 
-        # 进入群组
-        print(f"正在打开群组...")
-        page.goto(group_url, wait_until="domcontentloaded", timeout=60000)
+        # 进入群组（直接用 URL 参数切换到最新排序）
+        chronological_url = group_url + "?sorting_setting=CHRONOLOGICAL"
+        print(f"正在打开群组（最新排序）...")
+        page.goto(chronological_url, wait_until="domcontentloaded", timeout=60000)
         time.sleep(3)
         if page.query_selector('input[name="email"], input[name="pass"], #loginbutton'):
             print("Cookie 已过期，请重新使用 --login 登录。")
@@ -685,20 +686,7 @@ def run_scraper(args):
         group_name = get_group_name(page)
         group_info = {"group_name": group_name, "group_url": group_url}
         print(f"  群组名称: {group_name}")
-
-        # 切换到"最新帖子"排序（默认 Most Relevant 只显示部分帖子）
-        print(f"  切换到最新帖子排序...")
-        try:
-            sort_result = page.evaluate(JS_SWITCH_TO_NEW_POSTS)
-            if sort_result == 'clicked_sort_menu':
-                time.sleep(2)
-                select_result = page.evaluate(JS_SELECT_NEW_POSTS)
-                print(f"  排序切换: {select_result}")
-                time.sleep(3)  # 等待 feed 刷新
-            else:
-                print(f"  排序菜单未找到 ({sort_result})，使用默认排序")
-        except Exception as e:
-            print(f"  排序切换失败: {e}，使用默认排序")
+        print(f"  排序方式: 最新帖子 (CHRONOLOGICAL)")
 
         # 将已有 ID 注入浏览器，避免重复提取
         if existing_ids:
