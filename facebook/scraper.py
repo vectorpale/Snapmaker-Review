@@ -55,7 +55,7 @@ except ImportError:
 COOKIE_FILE = "fb_cookies.json"
 CHECKPOINT_DIR = "scraper_checkpoints"
 CHECKPOINT_EVERY = 50          # 每 N 条新帖子保存一次 checkpoint
-DOM_CLEANUP_EVERY = 10         # 每 N 次滚动清理一次 DOM
+DOM_CLEANUP_EVERY = 30         # 每 N 次滚动清理一次 DOM（太频繁可能干扰懒加载）
 
 # 拟人滚动参数（与篡改猴脚本一致）
 SCROLL_DELAY_MIN = 0.5
@@ -69,7 +69,7 @@ MICRO_PAUSE_CHANCE = 0.03
 MICRO_PAUSE_MIN = 0.5
 MICRO_PAUSE_MAX = 1.5
 MAX_NO_NEW_RETRIES = 25        # 连续无新内容后的恢复尝试次数
-MAX_RECOVERY_ROUNDS = 3        # 恢复策略最多尝试几轮
+MAX_RECOVERY_ROUNDS = 5        # 恢复策略最多尝试几轮
 
 
 # ── 注入浏览器的 JS 提取逻辑 ─────────────────────────────────────
@@ -314,7 +314,7 @@ JS_CLEANUP_DOM = """
         const child = feed.children[i];
         if (child.dataset.cleaned === "1") continue;
         const rect = child.getBoundingClientRect();
-        if (rect.bottom > -3000) continue;
+        if (rect.bottom > -8000) continue;
         const h = child.offsetHeight;
         // 先移除图片/视频/iframe 释放内存
         child.querySelectorAll('img, video, iframe, source').forEach(el => el.remove());
@@ -587,23 +587,24 @@ def _try_recovery(page: Page, no_new_count: int, group_url: str,
         if recovered:
             return recovered
 
-        # 策略6（最后一轮）: 刷新页面 + 快速滚到底部
+        # 策略6: 刷新页面（保留排序参数）+ 快速滚到底部
         if recovery_round == MAX_RECOVERY_ROUNDS:
             print(f"  策略6: 刷新页面重新加载...")
-            # 先保存已处理的 ID
             all_ids = list(existing_ids | {p["post_id"] for p in all_posts})
             try:
-                page.reload(wait_until="domcontentloaded", timeout=60000)
+                # 用 goto 而非 reload，确保保留排序参数
+                refresh_url = group_url.rstrip("/") + "?sorting_setting=CHRONOLOGICAL"
+                page.goto(refresh_url, wait_until="domcontentloaded", timeout=60000)
                 time.sleep(5)
                 dismiss_popups(page)
                 time.sleep(2)
                 # 注入已有 ID 避免重复
                 page.evaluate(f"window.__processedPostIds = {json.dumps(all_ids)}")
-                # 快速滚动加载新内容
-                print(f"  刷新后快速滚动...")
-                for i in range(30):
-                    page.evaluate("window.scrollBy({top: 2000, behavior: 'instant'})")
-                    time.sleep(1.5)
+                # 快速滚动到之前的深度，然后继续
+                print(f"  刷新后快速滚动（跳过已采集区域）...")
+                for i in range(50):
+                    page.evaluate("window.scrollBy({top: 3000, behavior: 'instant'})")
+                    time.sleep(1.0)
                     if i % 5 == 4:
                         result = page.evaluate(JS_EXTRACT_POSTS)
                         recovered = result.get("posts", [])
@@ -611,6 +612,18 @@ def _try_recovery(page: Page, no_new_count: int, group_url: str,
                             return recovered
             except Exception as e:
                 print(f"  刷新失败: {e}")
+
+        # 策略7: 额外的缓慢深滚（非最后一轮也尝试）
+        if recovery_round < MAX_RECOVERY_ROUNDS:
+            print(f"  策略7: 深度缓慢滚动...")
+            for _ in range(20):
+                page.evaluate("window.scrollBy({top: 1200, behavior: 'smooth'})")
+                time.sleep(2.5)
+            rand_delay(3.0, 5.0)
+            result = page.evaluate(JS_EXTRACT_POSTS)
+            recovered = result.get("posts", [])
+            if recovered:
+                return recovered
 
     return []
 
