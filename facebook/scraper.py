@@ -55,21 +55,20 @@ except ImportError:
 COOKIE_FILE = "fb_cookies.json"
 CHECKPOINT_DIR = "scraper_checkpoints"
 CHECKPOINT_EVERY = 50          # 每 N 条新帖子保存一次 checkpoint
-DOM_CLEANUP_EVERY = 30         # 每 N 次滚动清理一次 DOM（太频繁可能干扰懒加载）
 
-# 拟人滚动参数（与篡改猴脚本一致）
-SCROLL_DELAY_MIN = 0.5
-SCROLL_DELAY_MAX = 1.0
-SCROLL_STEP_MIN = 900
-SCROLL_STEP_MAX = 1600
-PAUSE_EVERY_N = 150            # 每 N 次滚动暂停
-PAUSE_DURATION_MIN = 3.0
-PAUSE_DURATION_MAX = 8.0
-MICRO_PAUSE_CHANCE = 0.03
-MICRO_PAUSE_MIN = 0.5
-MICRO_PAUSE_MAX = 1.5
-MAX_NO_NEW_RETRIES = 25        # 连续无新内容后的恢复尝试次数
-MAX_RECOVERY_ROUNDS = 5        # 恢复策略最多尝试几轮
+# 拟人滚动参数 — 模拟真实阅读速度
+SCROLL_DELAY_MIN = 1.5         # 每次滚动后等待（秒）
+SCROLL_DELAY_MAX = 3.0
+SCROLL_STEP_MIN = 400          # 每次滚动像素（约半屏，模拟阅读）
+SCROLL_STEP_MAX = 800
+PAUSE_EVERY_N = 80             # 每 N 次滚动长暂停（模拟离开）
+PAUSE_DURATION_MIN = 5.0
+PAUSE_DURATION_MAX = 15.0
+MICRO_PAUSE_CHANCE = 0.08      # 随机微停顿概率
+MICRO_PAUSE_MIN = 1.0
+MICRO_PAUSE_MAX = 3.0
+MAX_STALE_ROUNDS = 15          # 连续无新帖后判定卡住
+MAX_RELOADS = 10               # 最多重新加载页面次数
 
 
 # ── 注入浏览器的 JS 提取逻辑 ─────────────────────────────────────
@@ -305,30 +304,6 @@ JS_EXPAND_SEE_MORE = """
 }
 """
 
-JS_CLEANUP_DOM = """
-() => {
-    const feed = document.querySelector('div[role="feed"]');
-    if (!feed) return 0;
-    let cleaned = 0;
-    for (let i = 0; i < feed.children.length; i++) {
-        const child = feed.children[i];
-        if (child.dataset.cleaned === "1") continue;
-        const rect = child.getBoundingClientRect();
-        if (rect.bottom > -8000) continue;
-        const h = child.offsetHeight;
-        // 先移除图片/视频/iframe 释放内存
-        child.querySelectorAll('img, video, iframe, source').forEach(el => el.remove());
-        const placeholder = document.createElement("div");
-        placeholder.style.height = h + "px";
-        placeholder.dataset.cleaned = "1";
-        feed.replaceChild(placeholder, child);
-        cleaned++;
-        i--;
-    }
-    return cleaned;
-}
-"""
-
 JS_CHECK_LOADING = """
 () => {
     const feed = document.querySelector('div[role="feed"]');
@@ -339,53 +314,6 @@ JS_CHECK_LOADING = """
 }
 """
 
-JS_SWITCH_TO_NEW_POSTS = """
-() => {
-    // 点击排序下拉菜单，切换到 "New Posts" / "最新帖子"
-    // Facebook 群组排序按钮通常在 feed 上方
-    const sortLabels = ['most relevant', 'top posts', '最相關', '熱門貼文', 'new activity', 'recent activity'];
-    const newLabels = ['new posts', 'new', '新貼文', '最新帖子', '新帖子'];
-
-    // 方法1: 找到排序区域的按钮/链接并点击
-    const allElements = document.querySelectorAll('span, a, div[role="button"]');
-    for (const el of allElements) {
-        const t = (el.textContent || '').trim().toLowerCase();
-        // 找到当前显示的排序标签（如 "Most relevant"），点击它打开下拉
-        if (sortLabels.some(s => t === s) || (t.includes('sort') && t.length < 30)) {
-            el.click();
-            return 'clicked_sort_menu';
-        }
-    }
-    return 'sort_menu_not_found';
-}
-"""
-
-JS_SELECT_NEW_POSTS = """
-() => {
-    // 在已打开的下拉菜单中选择 "New posts"
-    const menuItems = document.querySelectorAll('div[role="menuitem"], div[role="menuitemradio"], div[role="option"], span');
-    for (const item of menuItems) {
-        const t = (item.textContent || '').trim().toLowerCase();
-        if (t === 'new posts' || t === 'new' || t === '新貼文' || t === '最新帖子' || t === '新帖子' || t === 'newest') {
-            item.click();
-            return 'selected_new_posts';
-        }
-    }
-    // 也尝试 menuitem 里的 radio 按钮
-    const radios = document.querySelectorAll('input[type="radio"], div[role="radio"]');
-    for (const r of radios) {
-        const label = r.closest('[role="menuitem"], [role="menuitemradio"], label');
-        if (label) {
-            const t = (label.textContent || '').trim().toLowerCase();
-            if (t.includes('new') || t.includes('最新') || t.includes('新貼文')) {
-                r.click();
-                return 'selected_new_posts_radio';
-            }
-        }
-    }
-    return 'new_posts_not_found';
-}
-"""
 
 
 # ── Cookie 管理 ──────────────────────────────────────────────────
@@ -510,122 +438,48 @@ def get_group_name(page: Page) -> str:
     return "Unknown Group"
 
 
-def _try_recovery(page: Page, no_new_count: int, group_url: str,
-                   all_posts: list, existing_ids: set) -> list:
-    """多轮多策略恢复尝试，返回新帖子列表（空列表表示确认到底）。"""
-    for recovery_round in range(1, MAX_RECOVERY_ROUNDS + 1):
-        print(f"  连续 {no_new_count} 次无新内容，恢复尝试 第{recovery_round}轮...")
+def _reload_and_continue(page: Page, group_url: str, all_posts: list,
+                         existing_ids: set) -> bool:
+    """重新加载页面，跳过已采集区域，准备继续滚动。
 
-        # 策略1: 大幅滚动
-        page.evaluate("window.scrollBy({top: 5000, behavior: 'instant'})")
-        rand_delay(5.0, 8.0)
-        result = page.evaluate(JS_EXTRACT_POSTS)
-        recovered = result.get("posts", [])
-        if recovered:
-            return recovered
+    返回 True 表示成功重新加载（即使暂时没新帖，可以继续滚动）。
+    返回 False 表示加载失败。
+    """
+    all_ids = list(existing_ids | {p["post_id"] for p in all_posts})
+    refresh_url = group_url.rstrip("/") + "?sorting_setting=CHRONOLOGICAL"
 
-        # 策略2: 滚到底部
-        print(f"  策略2: 滚到页面底部...")
-        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-        rand_delay(6.0, 10.0)
-        result = page.evaluate(JS_EXTRACT_POSTS)
-        recovered = result.get("posts", [])
-        if recovered:
-            return recovered
+    print(f"  重新加载页面（像用户刷新浏览器）...")
+    try:
+        page.goto(refresh_url, wait_until="domcontentloaded", timeout=60000)
+    except Exception as e:
+        print(f"  页面加载失败: {e}")
+        return False
 
-        # 策略3: 回顶部再下来
-        print(f"  策略3: 滚回顶部再下来...")
-        current_pos = page.evaluate("window.scrollY")
-        page.evaluate("window.scrollTo(0, 0)")
-        rand_delay(2.0, 4.0)
-        page.evaluate(f"window.scrollTo(0, {current_pos})")
-        rand_delay(5.0, 8.0)
-        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-        rand_delay(6.0, 10.0)
-        result = page.evaluate(JS_EXTRACT_POSTS)
-        recovered = result.get("posts", [])
-        if recovered:
-            return recovered
+    # 模拟用户等待页面加载
+    time.sleep(random.uniform(4, 7))
+    dismiss_popups(page)
+    time.sleep(random.uniform(1, 3))
 
-        # 策略4: 点击"加载更多帖子"按钮
-        print(f"  策略4: 尝试点击加载更多按钮...")
-        try:
-            clicked = page.evaluate("""() => {
-                const btns = document.querySelectorAll('div[role="button"], span[role="button"], a[role="button"]');
-                for (const btn of btns) {
-                    const t = btn.textContent.trim().toLowerCase();
-                    if (t.includes('see more posts') || t.includes('more posts') ||
-                        t.includes('load more') || t.includes('查看更多帖子') ||
-                        t.includes('顯示更多帖子') || t.includes('更多貼文') ||
-                        t.includes('show more')) {
-                        btn.click();
-                        return true;
-                    }
-                }
-                return false;
-            }""")
-            if clicked:
-                print(f"  已点击加载更多按钮")
-                rand_delay(8.0, 12.0)
-                result = page.evaluate(JS_EXTRACT_POSTS)
-                recovered = result.get("posts", [])
-                if recovered:
-                    return recovered
-        except Exception:
-            pass
+    # 注入已有 ID 避免重复
+    page.evaluate(f"window.__processedPostIds = {json.dumps(all_ids)}")
 
-        # 策略5: 长等待 + 缓慢滚动
-        wait_time = 15 + recovery_round * 5
-        print(f"  策略5: 长等待 {wait_time}s + 缓慢滚动...")
-        time.sleep(wait_time)
-        for _ in range(5):
-            page.evaluate("window.scrollBy({top: 800, behavior: 'smooth'})")
-            time.sleep(2)
-        rand_delay(5.0, 8.0)
-        result = page.evaluate(JS_EXTRACT_POSTS)
-        recovered = result.get("posts", [])
-        if recovered:
-            return recovered
+    # 用自然速度滚过已采集区域（像用户快速浏览旧帖）
+    skip_scrolls = max(len(all_posts) * 2, 30)
+    print(f"  快速浏览已采集区域（约 {skip_scrolls} 次滚动）...")
+    for i in range(skip_scrolls):
+        step = random.randint(600, 1000)
+        page.evaluate(f'window.scrollBy({{top: {step}, behavior: "smooth"}})')
+        time.sleep(random.uniform(0.6, 1.2))
 
-        # 策略6: 刷新页面（保留排序参数）+ 快速滚到底部
-        if recovery_round == MAX_RECOVERY_ROUNDS:
-            print(f"  策略6: 刷新页面重新加载...")
-            all_ids = list(existing_ids | {p["post_id"] for p in all_posts})
-            try:
-                # 用 goto 而非 reload，确保保留排序参数
-                refresh_url = group_url.rstrip("/") + "?sorting_setting=CHRONOLOGICAL"
-                page.goto(refresh_url, wait_until="domcontentloaded", timeout=60000)
-                time.sleep(5)
-                dismiss_popups(page)
-                time.sleep(2)
-                # 注入已有 ID 避免重复
-                page.evaluate(f"window.__processedPostIds = {json.dumps(all_ids)}")
-                # 快速滚动到之前的深度，然后继续
-                print(f"  刷新后快速滚动（跳过已采集区域）...")
-                for i in range(50):
-                    page.evaluate("window.scrollBy({top: 3000, behavior: 'instant'})")
-                    time.sleep(1.0)
-                    if i % 5 == 4:
-                        result = page.evaluate(JS_EXTRACT_POSTS)
-                        recovered = result.get("posts", [])
-                        if recovered:
-                            return recovered
-            except Exception as e:
-                print(f"  刷新失败: {e}")
-
-        # 策略7: 额外的缓慢深滚（非最后一轮也尝试）
-        if recovery_round < MAX_RECOVERY_ROUNDS:
-            print(f"  策略7: 深度缓慢滚动...")
-            for _ in range(20):
-                page.evaluate("window.scrollBy({top: 1200, behavior: 'smooth'})")
-                time.sleep(2.5)
-            rand_delay(3.0, 5.0)
+        # 定期检查是否已经有新帖子出现
+        if i > 10 and i % 8 == 0:
             result = page.evaluate(JS_EXTRACT_POSTS)
-            recovered = result.get("posts", [])
-            if recovered:
-                return recovered
+            new_posts = result.get("posts", [])
+            if new_posts:
+                print(f"  已到达新内容区域")
+                return True
 
-    return []
+    return True
 
 
 def run_scraper(args):
@@ -705,35 +559,24 @@ def run_scraper(args):
         if existing_ids:
             page.evaluate(f"window.__processedPostIds = {json.dumps(list(existing_ids))}")
 
-        # ── 主循环（移植篡改猴 startAutoScroll 逻辑）──
+        # ── 主循环：自然滚动 + 卡住时重新加载 ──
         all_posts = list(existing_posts)
         scroll_count = 0
         no_new_count = 0
         last_checkpoint_count = len(existing_posts)
-        total_dom_cleaned = 0
-        last_scroll_height = 0
+        reload_count = 0
 
         while len(all_posts) < args.max_posts:
-            # 展开"See more"（每 10 次滚动一次）
-            if scroll_count % 10 == 0:
+            # 展开"See more"（每 15 次滚动一次）
+            if scroll_count % 15 == 0:
                 try:
                     page.evaluate(JS_EXPAND_SEE_MORE)
                 except Exception:
                     pass
 
-            # DOM 瘦身（每 30 次滚动一次）
-            if scroll_count % DOM_CLEANUP_EVERY == 0 and len(all_posts) > 20:
-                try:
-                    cleaned = page.evaluate(JS_CLEANUP_DOM)
-                    if cleaned > 0:
-                        total_dom_cleaned += cleaned
-                        print(f"  [cleanup] 清理 {cleaned} 个 DOM 元素 (累计 {total_dom_cleaned})")
-                except Exception:
-                    pass
-
-            # 提取帖子（每 3 次滚动一次，与篡改猴一致）
+            # 提取帖子（每 4 次滚动一次）
             new_found = 0
-            if scroll_count % 3 == 0:
+            if scroll_count % 4 == 0:
                 try:
                     result = page.evaluate(JS_EXTRACT_POSTS)
                     new_posts = result.get("posts", [])
@@ -744,42 +587,48 @@ def run_scraper(args):
                 except Exception as e:
                     print(f"  提取出错: {e}")
 
-            # 滚动
+            # 自然滚动（smooth，模拟鼠标滚轮）
             step = random.randint(SCROLL_STEP_MIN, SCROLL_STEP_MAX)
-            page.evaluate(f'window.scrollBy({{top: {step}, behavior: "instant"}})')
+            page.evaluate(f'window.scrollBy({{top: {step}, behavior: "smooth"}})')
             scroll_count += 1
 
             # 无新内容检测
-            if new_found == 0 and scroll_count % 3 == 0:
+            if new_found == 0 and scroll_count % 4 == 0:
                 loading = page.evaluate(JS_CHECK_LOADING)
-                current_height = loading.get("scrollHeight", 0)
 
-                if loading.get("hasSpinner") and not loading.get("atBottom"):
+                if loading.get("hasSpinner"):
                     # 页面正在加载，耐心等待
-                    no_new_count += 1
                     if no_new_count % 10 == 0 and no_new_count > 0:
-                        print(f"  页面加载中... 等待 ({no_new_count}次)")
-                    rand_delay(1.0, 2.0)
-                    if no_new_count >= 80:
-                        print(f"  等待过久，尝试刺激加载...")
-                        page.evaluate("window.scrollBy({top: -500, behavior: 'instant'})")
-                        time.sleep(2)
-                        page.evaluate("window.scrollBy({top: 1500, behavior: 'instant'})")
-                        time.sleep(5)
-                        no_new_count = 50
+                        print(f"  页面加载中... ({no_new_count})")
+                    no_new_count += 1
+                    time.sleep(random.uniform(2.0, 4.0))
                 else:
                     no_new_count += 1
-                    if no_new_count >= MAX_NO_NEW_RETRIES:
-                        recovered = _try_recovery(page, no_new_count, group_url, all_posts, existing_ids)
-                        if recovered:
-                            all_posts.extend(recovered)
-                            no_new_count = 0
-                            print(f"  恢复加载！+{len(recovered)} 帖子 (总计 {len(all_posts)})")
-                        else:
-                            print(f"  确认到底，共采集 {len(all_posts)} 条帖子")
-                            break
 
-                last_scroll_height = current_height
+                if no_new_count >= MAX_STALE_ROUNDS:
+                    if reload_count >= MAX_RELOADS:
+                        print(f"  已重新加载 {reload_count} 次仍无新内容，确认到底")
+                        print(f"  共采集 {len(all_posts)} 条帖子")
+                        break
+
+                    # 卡住了 → 像用户一样刷新页面重来
+                    reload_count += 1
+                    print(f"  连续 {no_new_count} 次无新内容，重新加载 (第 {reload_count}/{MAX_RELOADS} 次)")
+
+                    # 重新加载前先保存
+                    save_checkpoint(group_id, all_posts, group_info)
+
+                    # 模拟用户休息一下再刷新
+                    rest = random.uniform(8, 20)
+                    print(f"  休息 {rest:.0f}s...")
+                    time.sleep(rest)
+
+                    if _reload_and_continue(page, group_url, all_posts, existing_ids):
+                        no_new_count = 0
+                        scroll_count = 0
+                    else:
+                        print(f"  重新加载失败，结束采集")
+                        break
             elif new_found > 0:
                 no_new_count = 0
 
@@ -788,16 +637,18 @@ def run_scraper(args):
                 save_checkpoint(group_id, all_posts, group_info)
                 last_checkpoint_count = len(all_posts)
 
-            # 拟人暂停
+            # 拟人暂停（模拟用户认真阅读某篇帖子）
             if scroll_count % PAUSE_EVERY_N == 0:
                 pause = random.uniform(PAUSE_DURATION_MIN, PAUSE_DURATION_MAX)
-                print(f"  [pause] 第 {scroll_count} 次滚动，暂停 {pause:.0f}s... ({len(all_posts)} 条)")
+                print(f"  [pause] 暂停 {pause:.0f}s 阅读... ({len(all_posts)} 条)")
                 time.sleep(pause)
 
+            # 随机微停顿（模拟阅读速度变化）
             if random.random() < MICRO_PAUSE_CHANCE:
-                rand_delay(MICRO_PAUSE_MIN, MICRO_PAUSE_MAX)
+                time.sleep(random.uniform(MICRO_PAUSE_MIN, MICRO_PAUSE_MAX))
 
-            rand_delay(SCROLL_DELAY_MIN, SCROLL_DELAY_MAX)
+            # 基础滚动间隔
+            time.sleep(random.uniform(SCROLL_DELAY_MIN, SCROLL_DELAY_MAX))
 
         # 最终保存
         save_checkpoint(group_id, all_posts, group_info)
