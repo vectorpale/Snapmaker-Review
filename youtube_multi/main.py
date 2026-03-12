@@ -723,44 +723,64 @@ def main():
     h2c_videos = [v for v in top_videos if v.get("category") == "h2c_review"]
     comp_videos = [v for v in top_videos if v.get("category") == "comparison"]
 
+    def _count_successful(vids):
+        """统计 LLM 分析成功的视频数量"""
+        return sum(
+            1 for v in vids
+            if llm_results.get(v["video_id"], {})
+               .get("transcript", {}).get("status") == "success"
+        )
+
     # U1 综合分析
     cached_u1 = load_checkpoint("overall_llm_analysis_u1")
-    if cached_u1 and cached_u1.get("status") == "success" and cached_u1.get("video_count") == len(u1_videos):
+    u1_success = _count_successful(u1_videos)
+    if (cached_u1 and cached_u1.get("status") == "success"
+            and cached_u1.get("video_count") == len(u1_videos)
+            and cached_u1.get("success_count") == u1_success):
         overall_llm_u1 = cached_u1
         logger.info(f"从检查点加载 U1 综合分析（{len(u1_videos)} 个视频）")
     elif len(u1_videos) > 0:
         overall_llm_u1 = generate_overall_with_llm(llm, llm_results, u1_videos, category="u1_review")
         overall_llm_u1["video_count"] = len(u1_videos)
+        overall_llm_u1["success_count"] = u1_success
         save_checkpoint("overall_llm_analysis_u1", overall_llm_u1)
     else:
         overall_llm_u1 = {"status": "skipped", "analysis_text": "", "error": "无U1视频"}
-    logger.info(f"U1 综合分析: {overall_llm_u1['status']} ({len(u1_videos)} 个视频)")
+    logger.info(f"U1 综合分析: {overall_llm_u1['status']} ({len(u1_videos)} 个视频, {u1_success} 成功)")
 
     # H2C 综合分析
     cached_h2c = load_checkpoint("overall_llm_analysis_h2c")
-    if cached_h2c and cached_h2c.get("status") == "success" and cached_h2c.get("video_count") == len(h2c_videos):
+    h2c_success = _count_successful(h2c_videos)
+    if (cached_h2c and cached_h2c.get("status") == "success"
+            and cached_h2c.get("video_count") == len(h2c_videos)
+            and cached_h2c.get("success_count") == h2c_success):
         overall_llm_h2c = cached_h2c
         logger.info(f"从检查点加载 H2C 综合分析（{len(h2c_videos)} 个视频）")
     elif len(h2c_videos) > 0:
         overall_llm_h2c = generate_overall_with_llm(llm, llm_results, h2c_videos, category="h2c_review")
         overall_llm_h2c["video_count"] = len(h2c_videos)
+        overall_llm_h2c["success_count"] = h2c_success
         save_checkpoint("overall_llm_analysis_h2c", overall_llm_h2c)
     else:
         overall_llm_h2c = {"status": "skipped", "analysis_text": "", "error": "无H2C视频"}
-    logger.info(f"H2C 综合分析: {overall_llm_h2c['status']} ({len(h2c_videos)} 个视频)")
+    logger.info(f"H2C 综合分析: {overall_llm_h2c['status']} ({len(h2c_videos)} 个视频, {h2c_success} 成功)")
 
     # 对比综合分析
     cached_comp = load_checkpoint("overall_llm_analysis_comparison")
-    if cached_comp and cached_comp.get("status") == "success" and cached_comp.get("video_count") == len(comp_videos):
+    comp_success = _count_successful(comp_videos)
+    if (cached_comp and cached_comp.get("status") == "success"
+            and cached_comp.get("video_count") == len(comp_videos)
+            and cached_comp.get("success_count") == comp_success):
         overall_llm_comp = cached_comp
         logger.info(f"从检查点加载对比综合分析（{len(comp_videos)} 个视频）")
     elif len(comp_videos) > 0:
         overall_llm_comp = generate_overall_with_llm(llm, llm_results, comp_videos, category="comparison")
         overall_llm_comp["video_count"] = len(comp_videos)
+        overall_llm_comp["success_count"] = comp_success
         save_checkpoint("overall_llm_analysis_comparison", overall_llm_comp)
     else:
         overall_llm_comp = {"status": "skipped", "analysis_text": "", "error": "无对比视频"}
-    logger.info(f"对比综合分析: {overall_llm_comp['status']} ({len(comp_videos)} 个视频)")
+    logger.info(f"对比综合分析: {overall_llm_comp['status']} ({len(comp_videos)} 个视频, {comp_success} 成功)")
 
     # 兼容旧变量名
     overall_llm = overall_llm_u1
